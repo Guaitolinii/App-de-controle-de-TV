@@ -8,5 +8,5 @@ coverage/
 !.env.example
 
 # Projetos nativos gerados pelo Capacitor (o iOS é gerado no GitHub Actions)
-ios/
-android/
+/ios/
+/android/
