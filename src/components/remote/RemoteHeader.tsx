@@ -11,6 +11,7 @@ interface RemoteHeaderProps {
   onOpenGuide: () => void;
   onOpenSettings: () => void;
   onOpenMobileExport: () => void;
+  onOpenWifiPairing: () => void;
 }
 
 export const RemoteHeader: React.FC<RemoteHeaderProps> = ({
@@ -22,8 +23,10 @@ export const RemoteHeader: React.FC<RemoteHeaderProps> = ({
   onOpenGuide,
   onOpenSettings,
   onOpenMobileExport,
+  onOpenWifiPairing,
 }) => {
   const isOnline = powerState === 'on';
+  const isPaired = !!device.clientKey;
 
   return (
     <div className="flex items-center justify-between w-full pb-3 border-b border-white/5">
@@ -46,14 +49,15 @@ export const RemoteHeader: React.FC<RemoteHeaderProps> = ({
         />
       </button>
 
-      {/* Center Device Selector & Status */}
+      {/* Center Device Selector & Wi-Fi Status */}
       <button
-        onClick={onOpenDeviceManager}
-        className="flex flex-col items-center px-3 py-1.5 rounded-xl hover:bg-white/5 transition-all text-center group"
+        onClick={onOpenWifiPairing}
+        title="Clique para configurar ou refazer pareamento Wi-Fi"
+        className="flex flex-col items-center px-3 py-1.5 rounded-2xl hover:bg-white/5 transition-all text-center group border border-transparent hover:border-white/10"
       >
         <div className="flex items-center gap-1.5 text-xs font-semibold text-neutral-200 group-hover:text-white">
-          <span className="truncate max-w-[130px] sm:max-w-[160px]">{device.name}</span>
-          <ChevronDown className="w-3.5 h-3.5 text-neutral-400 group-hover:text-white transition-transform group-hover:translate-y-0.5" />
+          <span className="truncate max-w-[125px] sm:max-w-[155px]">{device.name}</span>
+          <Wifi className={`w-3.5 h-3.5 ${isOnline ? 'text-emerald-400' : 'text-neutral-400 group-hover:text-red-400'}`} />
         </div>
         <div className="flex items-center gap-1.5 text-[10px] mt-0.5">
           <span 
@@ -66,15 +70,24 @@ export const RemoteHeader: React.FC<RemoteHeaderProps> = ({
             }`} 
           />
           <span className={powerState === 'on' ? 'text-emerald-400 font-medium' : 'text-neutral-400'}>
-            {powerState === 'on' ? 'WiFi Conectado' : powerState === 'turning_on' ? 'Iniciando...' : 'Standby (WoL)'}
+            {powerState === 'on' ? (isPaired ? 'Wi-Fi Pareado' : 'Aguardando Pareamento') : 'Standby (Wi-Fi)'}
           </span>
           <span className="text-neutral-600">•</span>
           <span className="text-neutral-500 font-mono text-[9px]">{device.ip}</span>
         </div>
       </button>
 
-      {/* Quick Action Tools (Mobile APK/IPA, Diagnostics, Guide, Settings) */}
+      {/* Quick Action Tools (Wi-Fi, Mobile APK/IPA, Diagnostics, Settings) */}
       <div className="flex items-center gap-1">
+        <button
+          onClick={onOpenWifiPairing}
+          title="Parear via Wi-Fi"
+          className="h-8 px-2 rounded-xl bg-neutral-800/80 hover:bg-neutral-700/80 text-emerald-400 hover:text-emerald-300 border border-white/5 flex items-center gap-1 transition-colors text-xs font-bold"
+        >
+          <Wifi className="w-3.5 h-3.5" />
+          <span className="text-[10px] hidden sm:inline">Wi-Fi</span>
+        </button>
+
         <button
           onClick={onOpenMobileExport}
           title="Instalar / Exportar APK e IPA para Celular"

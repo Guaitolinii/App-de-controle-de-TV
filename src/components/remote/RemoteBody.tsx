@@ -33,6 +33,7 @@ interface RemoteBodyProps {
   onOpenGuide: () => void;
   onOpenSettings: () => void;
   onOpenMobileExport: () => void;
+  onOpenWifiPairing: () => void;
   onOpenInputs: () => void;
   onToggleHome: () => void;
   onCommand: (command: string, label: string) => void;
@@ -66,6 +67,7 @@ export const RemoteBody: React.FC<RemoteBodyProps> = ({
   onOpenGuide,
   onOpenSettings,
   onOpenMobileExport,
+  onOpenWifiPairing,
   onOpenInputs,
   onToggleHome,
   onCommand,
@@ -115,6 +117,7 @@ export const RemoteBody: React.FC<RemoteBodyProps> = ({
           onOpenGuide={onOpenGuide}
           onOpenSettings={onOpenSettings}
           onOpenMobileExport={onOpenMobileExport}
+          onOpenWifiPairing={onOpenWifiPairing}
         />
 
         {/* Tab Switcher */}

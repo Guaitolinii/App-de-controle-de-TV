@@ -40,9 +40,10 @@ export const SSAP_ENDPOINTS = {
   GET_CHANNEL_LIST: 'ssap://tv/getChannelList',
   OPEN_CHANNEL: 'ssap://tv/openChannel',
 
-  // Input
+  // Input & Pointer Socket
   SWITCH_INPUT: 'ssap://tv/switchInput',
   GET_INPUT_LIST: 'ssap://tv/getExternalInputList',
+  GET_INPUT_SOCKET: 'ssap://com.webos.service.networkinput/getPointerInputSocket',
 
   // Launcher & Apps
   LAUNCH: 'ssap://system.launcher/launch',

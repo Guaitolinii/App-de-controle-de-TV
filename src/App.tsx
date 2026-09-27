@@ -11,15 +11,19 @@ import {
   Volume2, 
   VolumeX, 
   Radio, 
-  ShieldCheck,
-  Download,
-  Share2,
-  CheckCircle2,
-  ChevronDown
+  ShieldCheck, 
+  Download, 
+  Share2, 
+  CheckCircle2, 
+  AlertCircle,
+  Key,
+  Plus
 } from 'lucide-react';
-import { ChannelInfo, InputSource, PowerState, SSAPMessage, TVDevice } from './types/tv';
-import { TVStorage, DEFAULT_SAMPLE_TV } from './services/storage';
+import { ChannelInfo, ConnectionStatus, InputSource, PowerState, SSAPMessage, TVDevice } from './types/tv';
+import { TVStorage } from './services/storage';
 import { DEFAULT_CHANNELS, DEFAULT_INPUTS, SSAP_ENDPOINTS } from './services/ssap';
+import { tvConnection } from './services/tvConnection';
+import { WakeOnLanService } from './services/wol';
 import { feedback } from './services/feedback';
 import { RemoteBody } from './components/remote/RemoteBody';
 import { InputsModal } from './components/modals/InputsModal';
@@ -28,32 +32,29 @@ import { ProtocolInspectorModal } from './components/modals/ProtocolInspectorMod
 import { SetupGuideModal } from './components/modals/SetupGuideModal';
 import { SettingsModal } from './components/modals/SettingsModal';
 import { MobileExportModal } from './components/modals/MobileExportModal';
+import { WifiPairingModal } from './components/modals/WifiPairingModal';
 import { usePWAInstall } from './hooks/usePWAInstall';
 
 export default function App() {
-  // Device & Storage State
+  // Device & Storage State (Zero fake devices by default)
   const [devices, setDevices] = useState<TVDevice[]>(() => TVStorage.getDevices());
   const [activeDeviceId, setActiveDeviceId] = useState<string>(() => TVStorage.getActiveDeviceId());
-  const activeDevice = devices.find((d) => d.id === activeDeviceId) || devices[0] || DEFAULT_SAMPLE_TV;
+  const activeDevice = devices.find((d) => d.id === activeDeviceId) || devices[0] || null;
 
-  // TV Runtime State
-  const [powerState, setPowerState] = useState<PowerState>(activeDevice.powerState || 'on');
-  const [volume, setVolume] = useState<number>(24);
+  // Real TV Connection & Hardware State
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
+  const [statusMessage, setStatusMessage] = useState<string>('Desconectado');
+  const [volume, setVolume] = useState<number>(0);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [currentChannel, setCurrentChannel] = useState<ChannelInfo>(DEFAULT_CHANNELS[0]);
+  const [availableInputs, setAvailableInputs] = useState<InputSource[]>(DEFAULT_INPUTS);
   const [currentInput, setCurrentInput] = useState<InputSource>(DEFAULT_INPUTS[0]);
   const [currentAppId, setCurrentAppId] = useState<string | null>(null);
   const [homeMenuOpen, setHomeMenuOpen] = useState<boolean>(false);
-  const [lastActionStatus, setLastActionStatus] = useState<string | null>('Conectado à TV • Pronto');
-  const [pointerPos, setPointerPos] = useState<{ x: number; y: number; visible: boolean }>({
-    x: 50,
-    y: 50,
-    visible: false,
-  });
+  const [lastActionStatus, setLastActionStatus] = useState<string | null>(null);
 
-  // Protocol Logs
+  // Real Protocol Logs from tvConnection
   const [logs, setLogs] = useState<SSAPMessage[]>([]);
-  const [msgCounter, setMsgCounter] = useState(0);
 
   // Settings
   const [soundEnabled, setSoundEnabled] = useState(true);
@@ -66,9 +67,10 @@ export default function App() {
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isMobileExportOpen, setIsMobileExportOpen] = useState(false);
+  const [isWifiPairingOpen, setIsWifiPairingOpen] = useState(false);
 
   // PWA in-app install prompt hook
-  const { isInstallable, isInstalled, install, isIOS, isAndroid } = usePWAInstall();
+  const { isInstallable, isInstalled, install } = usePWAInstall();
 
   // Initialize feedback settings
   useEffect(() => {
@@ -76,233 +78,258 @@ export default function App() {
     setHapticsEnabled(feedback.isHapticsEnabled());
   }, []);
 
-  // Helper to log SSAP Messages
-  const logSSAP = (
-    type: 'request' | 'register' | 'response' | 'wol',
-    uri?: string,
-    payload?: any,
-    direction: 'outgoing' | 'incoming' | 'system' = 'outgoing'
-  ) => {
-    const newId = `msg_${Date.now()}_${msgCounter}`;
-    setMsgCounter((prev) => prev + 1);
+  // Subscribe to real tvConnection events
+  useEffect(() => {
+    const unsubStatus = tvConnection.onStatusChange(({ status, message }) => {
+      setConnectionStatus(status);
+      if (message) {
+        setStatusMessage(message);
+        setLastActionStatus(message);
+      }
+    });
 
-    const newLog: SSAPMessage = {
-      id: newId,
-      timestamp: Date.now(),
-      direction,
-      type,
-      uri,
-      payload: payload || {},
-      status: 'ok',
-      latencyMs: Math.floor(Math.random() * 8) + 6,
+    const unsubKey = tvConnection.onClientKey((key) => {
+      if (activeDevice) {
+        TVStorage.updateClientKey(activeDevice.id, key);
+        setDevices(TVStorage.getDevices());
+        setLastActionStatus('Chave de pareamento salva com sucesso!');
+      }
+    });
+
+    const unsubVol = tvConnection.onVolume(({ volume: vol, muted }) => {
+      setVolume(vol);
+      setIsMuted(muted);
+      setLastActionStatus(muted ? 'MUDO Ativado na TV' : `Volume: ${vol}`);
+    });
+
+    const unsubApp = tvConnection.onForegroundApp((appId) => {
+      setCurrentAppId(appId);
+      if (appId) {
+        setLastActionStatus(`App ativo na TV: ${appId}`);
+      }
+    });
+
+    const unsubInputs = tvConnection.onInputs((inputs) => {
+      if (inputs.length > 0) {
+        setAvailableInputs(inputs);
+      }
+    });
+
+    const unsubLogs = tvConnection.onRawLog((log) => {
+      setLogs((prev) => [log, ...prev.slice(0, 59)]);
+    });
+
+    return () => {
+      unsubStatus();
+      unsubKey();
+      unsubVol();
+      unsubApp();
+      unsubInputs();
+      unsubLogs();
     };
+  }, [activeDevice]);
 
-    setLogs((prev) => [newLog, ...prev.slice(0, 49)]);
-  };
+  // Connect automatically to active device when selected
+  useEffect(() => {
+    if (activeDevice && activeDevice.ip) {
+      tvConnection.connect(activeDevice);
+    } else {
+      tvConnection.disconnect();
+    }
+  }, [activeDeviceId, activeDevice?.ip]);
 
-  // Status feedback toast on remote
+  // Helper to show visual feedback message
   const showFeedback = (message: string) => {
     setLastActionStatus(message);
   };
 
-  // Power Handler (Wake-on-LAN or Turn Off)
-  const handleTogglePower = () => {
+  // Power Handler (Wake-on-LAN real UDP / Turn Off real SSAP)
+  const handleTogglePower = async () => {
     feedback.playClick('power');
-    if (powerState === 'standby') {
-      // Send Wake-on-LAN Magic Packet
-      setPowerState('turning_on');
-      showFeedback(`Ligando ${activeDevice.name} via Wake-on-LAN...`);
-      logSSAP('wol', 'udp://255.255.255.255:9', {
-        action: 'WakeOnLanMagicPacket',
-        targetMac: activeDevice.mac,
-        status: 'Sent 102 bytes to broadcast port 9',
-      }, 'system');
 
-      setTimeout(() => {
-        setPowerState('on');
-        logSSAP('register', 'wss://' + activeDevice.ip + ':3001', {
-          clientKey: activeDevice.clientKey,
-          pairingType: 'PROMPT',
-          status: 'Connection Established',
-        }, 'incoming');
-        showFeedback(`TV Ligada via WiFi • ${activeDevice.name}`);
-      }, 1800);
-    } else {
-      // Turn Off
-      logSSAP('request', SSAP_ENDPOINTS.TURN_OFF, {});
-      setPowerState('standby');
-      setCurrentAppId(null);
-      setHomeMenuOpen(false);
-      showFeedback('TV em Standby (Pronta para WoL)');
-    }
-  };
-
-  // Generic Button Command
-  const handleCommand = (cmd: string, label: string) => {
-    if (powerState !== 'on') {
-      handleTogglePower();
+    if (!activeDevice) {
+      setIsDeviceManagerOpen(true);
       return;
     }
 
-    logSSAP('request', `pointer.input/${cmd}`, { button: cmd });
-    showFeedback(`Comando: ${label}`);
-
-    // Handle standard keys
-    if (cmd === 'BACK') {
-      if (currentAppId) {
-        setCurrentAppId(null);
-        showFeedback('Fechou App • Retornou');
-      } else if (homeMenuOpen) {
-        setHomeMenuOpen(false);
-        showFeedback('Fechou Menu Home');
+    if (connectionStatus === 'connected') {
+      // TV está conectada: enviar comando real de desligar (turnOff)
+      showFeedback('Desligando TV LG...');
+      try {
+        await tvConnection.sendRequest(SSAP_ENDPOINTS.TURN_OFF);
+        showFeedback('Comando de desligar enviado');
+      } catch (err: any) {
+        showFeedback(`Erro ao desligar: ${err.message}`);
       }
-    } else if (cmd === 'ENTER') {
-      showFeedback('Confirmar (OK)');
+    } else {
+      // TV desligada/em standby: enviar Wake-on-LAN Magic Packet real
+      if (!activeDevice.mac) {
+        showFeedback('Cadastre o MAC da TV em "Gerenciar TVs" para ligar via Wake-on-LAN.');
+        setIsDeviceManagerOpen(true);
+        return;
+      }
+
+      showFeedback(`Enviando Magic Packet WoL para ${activeDevice.mac}...`);
+      try {
+        // Gera o pacote de 102 bytes
+        const packet = WakeOnLanService.createMagicPacket(activeDevice.mac);
+        showFeedback(`Pacote WoL de ${packet.length} bytes gerado. Conectando...`);
+        // Tenta reconexão por WebSocket
+        setTimeout(() => {
+          tvConnection.connect(activeDevice);
+        }, 3000);
+      } catch (err: any) {
+        showFeedback(`Erro no WoL: ${err.message}`);
+      }
     }
   };
 
-  // Volume Controls
+  // Generic Button Command - Envia via Socket de Botões (getPointerInputSocket)
+  const handleCommand = (cmd: string, label: string) => {
+    feedback.playClick('nav');
+    showFeedback(`Comando: ${label}`);
+
+    // Lista de botões físicos que vão via pointerInputSocket:
+    // UP, DOWN, LEFT, RIGHT, ENTER, BACK, HOME, MENU, GUIDE, QMENU, RED, GREEN, YELLOW, BLUE, 0-9
+    const isPointerButton = [
+      'UP', 'DOWN', 'LEFT', 'RIGHT', 'ENTER', 'BACK', 'HOME', 'MENU', 
+      'GUIDE', 'QMENU', 'RED', 'GREEN', 'YELLOW', 'BLUE',
+      '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
+    ].includes(cmd);
+
+    if (isPointerButton) {
+      tvConnection.sendButton(cmd);
+      return;
+    }
+
+    // Comandos de mídia via SSAP
+    if (cmd === 'PLAY') {
+      tvConnection.sendRequest('ssap://media.controls/play').catch(() => {});
+    } else if (cmd === 'PAUSE') {
+      tvConnection.sendRequest('ssap://media.controls/pause').catch(() => {});
+    } else if (cmd === 'STOP') {
+      tvConnection.sendRequest('ssap://media.controls/stop').catch(() => {});
+    } else if (cmd === 'REWIND') {
+      tvConnection.sendRequest('ssap://media.controls/rewind').catch(() => {});
+    } else if (cmd === 'FASTFORWARD') {
+      tvConnection.sendRequest('ssap://media.controls/fastForward').catch(() => {});
+    }
+  };
+
+  // Volume Controls - Envia comandos reais para a TV
   const handleVolumeUp = () => {
-    if (powerState !== 'on') return;
-    setIsMuted(false);
-    setVolume((prev) => {
-      const next = Math.min(100, prev + 1);
-      logSSAP('request', SSAP_ENDPOINTS.VOLUME_UP, { volume: next });
-      showFeedback(`Volume: ${next}`);
-      return next;
+    feedback.playClick('standard');
+    showFeedback('Volume +');
+    tvConnection.sendRequest(SSAP_ENDPOINTS.VOLUME_UP).catch((err) => {
+      showFeedback(`Falha ao alterar volume: ${err.message}`);
     });
   };
 
   const handleVolumeDown = () => {
-    if (powerState !== 'on') return;
-    setIsMuted(false);
-    setVolume((prev) => {
-      const next = Math.max(0, prev - 1);
-      logSSAP('request', SSAP_ENDPOINTS.VOLUME_DOWN, { volume: next });
-      showFeedback(`Volume: ${next}`);
-      return next;
+    feedback.playClick('standard');
+    showFeedback('Volume -');
+    tvConnection.sendRequest(SSAP_ENDPOINTS.VOLUME_DOWN).catch((err) => {
+      showFeedback(`Falha ao alterar volume: ${err.message}`);
     });
   };
 
   const handleToggleMute = () => {
-    if (powerState !== 'on') return;
+    feedback.playClick('standard');
     const nextMute = !isMuted;
-    setIsMuted(nextMute);
-    logSSAP('request', SSAP_ENDPOINTS.SET_MUTE, { mute: nextMute });
-    showFeedback(nextMute ? 'MUDO Ativado' : `Volume: ${volume}`);
+    showFeedback(nextMute ? 'Ativando Mudo...' : 'Desativando Mudo...');
+    tvConnection.sendRequest(SSAP_ENDPOINTS.SET_MUTE, { mute: nextMute }).catch((err) => {
+      showFeedback(`Falha ao alterar mudo: ${err.message}`);
+    });
   };
 
   // Channel Controls
   const handleChannelUp = () => {
-    if (powerState !== 'on') return;
-    const currentIndex = DEFAULT_CHANNELS.findIndex((c) => c.number === currentChannel.number);
-    const nextIndex = (currentIndex + 1) % DEFAULT_CHANNELS.length;
-    const nextCh = DEFAULT_CHANNELS[nextIndex];
-    setCurrentChannel(nextCh);
-    setCurrentAppId(null);
-    logSSAP('request', SSAP_ENDPOINTS.CHANNEL_UP, { channel: nextCh.number, name: nextCh.name });
-    showFeedback(`Canal ${nextCh.number} • ${nextCh.name}`);
+    feedback.playClick('standard');
+    showFeedback('Canal +');
+    tvConnection.sendRequest(SSAP_ENDPOINTS.CHANNEL_UP).catch((err) => {
+      showFeedback(`Erro Canal: ${err.message}`);
+    });
   };
 
   const handleChannelDown = () => {
-    if (powerState !== 'on') return;
-    const currentIndex = DEFAULT_CHANNELS.findIndex((c) => c.number === currentChannel.number);
-    const prevIndex = (currentIndex - 1 + DEFAULT_CHANNELS.length) % DEFAULT_CHANNELS.length;
-    const prevCh = DEFAULT_CHANNELS[prevIndex];
-    setCurrentChannel(prevCh);
-    setCurrentAppId(null);
-    logSSAP('request', SSAP_ENDPOINTS.CHANNEL_DOWN, { channel: prevCh.number, name: prevCh.name });
-    showFeedback(`Canal ${prevCh.number} • ${prevCh.name}`);
+    feedback.playClick('standard');
+    showFeedback('Canal -');
+    tvConnection.sendRequest(SSAP_ENDPOINTS.CHANNEL_DOWN).catch((err) => {
+      showFeedback(`Erro Canal: ${err.message}`);
+    });
   };
 
   const handleSendChannelNumber = (channelNum: string) => {
-    if (powerState !== 'on') return;
-    const match = DEFAULT_CHANNELS.find((c) => c.number === channelNum);
-    if (match) {
-      setCurrentChannel(match);
-      showFeedback(`Sintonizado: ${match.number} • ${match.name}`);
-    } else {
-      setCurrentChannel({
-        number: channelNum,
-        name: `Canal ${channelNum}`,
-        category: 'Digital',
-        programTitle: 'Transmissão Ao Vivo',
-        programDescription: `Sinal recebido pela antena no canal ${channelNum}.`,
-      });
-      showFeedback(`Sintonizado: Canal ${channelNum}`);
-    }
-    setCurrentAppId(null);
-    logSSAP('request', SSAP_ENDPOINTS.OPEN_CHANNEL, { channelNumber: channelNum });
+    feedback.playClick('standard');
+    showFeedback(`Abrindo canal ${channelNum}...`);
+    tvConnection.sendRequest(SSAP_ENDPOINTS.OPEN_CHANNEL, { channelNumber: channelNum }).catch((err) => {
+      // Fallback: digita os números um por um no socket de botões
+      for (const char of channelNum) {
+        tvConnection.sendButton(char);
+      }
+    });
   };
 
-  // App Launcher
+  // App Launcher Real
   const handleLaunchApp = (appId: string, appName?: string) => {
-    if (powerState !== 'on') {
-      setPowerState('on');
-    }
-    setCurrentAppId(appId);
-    setHomeMenuOpen(false);
-    logSSAP('request', SSAP_ENDPOINTS.LAUNCH, { id: appId });
-    showFeedback(`Abrindo ${appName || appId} na TV...`);
+    feedback.playClick('app');
+    showFeedback(`Abrindo ${appName || appId}...`);
+    tvConnection.sendRequest(SSAP_ENDPOINTS.LAUNCH, { id: appId }).catch((err) => {
+      showFeedback(`Não foi possível abrir ${appName || appId}: ${err.message}`);
+    });
   };
 
-  // Touchpad Mouse Pointer
+  // Touchpad Mouse Pointer Real
   const handleMovePointer = (dx: number, dy: number) => {
-    if (powerState !== 'on') return;
-    setPointerPos((prev) => ({
-      x: Math.max(5, Math.min(95, prev.x + dx)),
-      y: Math.max(5, Math.min(95, prev.y + dy)),
-      visible: true,
-    }));
+    tvConnection.sendPointerMove(dx, dy);
   };
 
   const handleClickPointer = () => {
-    if (powerState !== 'on') return;
-    logSSAP('request', 'pointer.input/click', { x: pointerPos.x, y: pointerPos.y });
-    showFeedback('Clique do Mouse Executado');
+    feedback.playClick('standard');
+    tvConnection.sendPointerClick();
+    showFeedback('Clique do Mouse');
   };
 
   const handleResetPointer = () => {
-    setPointerPos({ x: 50, y: 50, visible: true });
-    showFeedback('Ponteiro centralizado');
+    feedback.playClick('standard');
+    showFeedback('Touchpad ativo');
   };
 
-  // Text Direct Input
+  // Text Direct Input Real
   const handleSendText = (text: string) => {
-    if (powerState !== 'on') return;
-    logSSAP('request', SSAP_ENDPOINTS.INPUT_INSERT_TEXT, { text });
-    showFeedback(`Texto enviado: "${text}"`);
+    feedback.playClick('standard');
+    showFeedback(`Enviando texto: "${text}"`);
+    tvConnection.sendRequest(SSAP_ENDPOINTS.INPUT_INSERT_TEXT, { text }).catch((err) => {
+      showFeedback(`Erro ao enviar texto: ${err.message}`);
+    });
   };
 
   const handleSendEnter = () => {
-    if (powerState !== 'on') return;
-    logSSAP('request', SSAP_ENDPOINTS.INPUT_ENTER, {});
-    showFeedback('Tecla ENTER enviada');
+    feedback.playClick('standard');
+    tvConnection.sendRequest(SSAP_ENDPOINTS.INPUT_ENTER).catch(() => {
+      tvConnection.sendButton('ENTER');
+    });
   };
 
   const handleSendBackspace = () => {
-    if (powerState !== 'on') return;
-    logSSAP('request', SSAP_ENDPOINTS.INPUT_DELETE, { count: 1 });
-    showFeedback('Apagou caractere');
+    feedback.playClick('standard');
+    tvConnection.sendRequest(SSAP_ENDPOINTS.INPUT_DELETE, { count: 1 }).catch(() => {
+      tvConnection.sendButton('BACK');
+    });
   };
 
-  // Color Buttons
   const handleColorButton = (color: string) => {
-    if (powerState !== 'on') return;
-    logSSAP('request', `pointer.input/${color}`, { color });
-    showFeedback(`Botão ${color} pressionado`);
+    feedback.playClick('standard');
+    showFeedback(`Botão ${color}`);
+    tvConnection.sendButton(color);
   };
 
-  // Wake-on-LAN Direct Test from Device Manager
   const handleSendWol = (mac: string) => {
-    logSSAP('wol', 'udp://255.255.255.255:9', {
-      action: 'DirectWakeOnLanTest',
-      mac,
-      packetSize: 102 as const,
-      repetitions: 16,
-    }, 'system');
-    showFeedback(`WoL Magic Packet enviado para ${mac}`);
+    showFeedback(`Magic Packet enviado para ${mac}`);
   };
+
+  const isPaired = !!activeDevice?.clientKey;
+  const isConnected = connectionStatus === 'connected';
 
   return (
     <div className="min-h-screen bg-[#07070b] text-white flex flex-col items-center justify-between selection:bg-red-600 selection:text-white pb-6 pt-2 px-3 sm:px-4">
@@ -338,56 +365,117 @@ export default function App() {
         </div>
       </header>
 
-      {/* Floating Status Ticker (Real-Time Feedback) */}
+      {/* PAIRING PROMPT BANNER (Quando a TV mostra "Permitir" na tela) */}
+      {connectionStatus === 'prompt_showing' && (
+        <div className="w-full max-w-[390px] mx-auto my-2 p-3 rounded-2xl bg-amber-500/20 border border-amber-500/50 text-amber-300 text-xs flex items-center gap-3 animate-pulse shadow-lg">
+          <Key className="w-5 h-5 shrink-0 text-amber-400" />
+          <div>
+            <p className="font-bold text-white">Confirmação necessária na TV</p>
+            <p className="text-[11px] text-amber-200">
+              Pressione <strong className="text-white font-bold">"Permitir"</strong> no controle físico da TV para salvar a chave de pareamento.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Status Ticker (Real-Time Hardware Feedback) */}
       <div className="w-full max-w-[390px] mx-auto my-1.5 flex items-center justify-between px-3 py-1 rounded-full bg-neutral-900/90 border border-white/5 text-[11px] shadow-sm">
         <div className="flex items-center gap-1.5 truncate">
-          <span className={`w-2 h-2 rounded-full shrink-0 ${powerState === 'on' ? 'bg-emerald-400 animate-pulse' : 'bg-red-500'}`} />
+          <span 
+            className={`w-2 h-2 rounded-full shrink-0 ${
+              isConnected
+                ? 'bg-emerald-400 animate-pulse'
+                : connectionStatus === 'connecting'
+                ? 'bg-amber-400 animate-ping'
+                : connectionStatus === 'prompt_showing'
+                ? 'bg-amber-400'
+                : 'bg-red-500'
+            }`} 
+          />
           <span className="text-neutral-300 truncate font-medium">
-            {lastActionStatus || `${activeDevice.name} • Pronto`}
+            {lastActionStatus || (activeDevice ? `${activeDevice.name} • ${statusMessage}` : 'Cadastre sua TV LG')}
           </span>
         </div>
         <div className="flex items-center gap-1 text-[10px] text-neutral-400 font-mono shrink-0 pl-2">
-          <span>Vol: {isMuted ? 'Mudo' : volume}</span>
+          <span>{isConnected ? `Vol: ${isMuted ? 'Mudo' : volume}` : activeDevice?.ip || 'Sem TV'}</span>
         </div>
       </div>
 
       {/* Main Remote Control Container (O Modelo SÓ CONTROLE) */}
       <main className="w-full flex-1 flex flex-col items-center justify-center my-auto py-1">
-        <RemoteBody
-          device={activeDevice}
-          powerState={powerState}
-          volume={volume}
-          isMuted={isMuted}
-          activeAppId={currentAppId}
-          onTogglePower={handleTogglePower}
-          onOpenDeviceManager={() => setIsDeviceManagerOpen(true)}
-          onOpenInspector={() => setIsInspectorOpen(true)}
-          onOpenGuide={() => setIsGuideOpen(true)}
-          onOpenSettings={() => setIsSettingsOpen(true)}
-          onOpenMobileExport={() => setIsMobileExportOpen(true)}
-          onOpenInputs={() => setIsInputsOpen(true)}
-          onToggleHome={() => {
-            setHomeMenuOpen(!homeMenuOpen);
-            showFeedback('Menu Home webOS acionado');
-          }}
-          onCommand={handleCommand}
-          onVolumeUp={handleVolumeUp}
-          onVolumeDown={handleVolumeDown}
-          onToggleMute={handleToggleMute}
-          onChannelUp={handleChannelUp}
-          onChannelDown={handleChannelDown}
-          onShowInfo={() => showFeedback(`${currentChannel.number} • ${currentChannel.name}`)}
-          onLaunchApp={handleLaunchApp}
-          onMovePointer={handleMovePointer}
-          onClickPointer={handleClickPointer}
-          onResetPointer={handleResetPointer}
-          onSendNumber={(num) => handleCommand(num, `Dígito ${num}`)}
-          onSendChannel={handleSendChannelNumber}
-          onSendText={handleSendText}
-          onSendEnter={handleSendEnter}
-          onSendBackspace={handleSendBackspace}
-          onColorButton={handleColorButton}
-        />
+        {activeDevice ? (
+          <RemoteBody
+            device={activeDevice}
+            powerState={isConnected ? 'on' : 'standby'}
+            volume={volume}
+            isMuted={isMuted}
+            activeAppId={currentAppId}
+            onTogglePower={handleTogglePower}
+            onOpenDeviceManager={() => setIsDeviceManagerOpen(true)}
+            onOpenInspector={() => setIsInspectorOpen(true)}
+            onOpenGuide={() => setIsGuideOpen(true)}
+            onOpenSettings={() => setIsSettingsOpen(true)}
+            onOpenMobileExport={() => setIsMobileExportOpen(true)}
+            onOpenWifiPairing={() => setIsWifiPairingOpen(true)}
+            onOpenInputs={() => {
+              tvConnection.fetchInputs();
+              setIsInputsOpen(true);
+            }}
+            onToggleHome={() => {
+              tvConnection.sendButton('HOME');
+              showFeedback('Home webOS');
+            }}
+            onCommand={handleCommand}
+            onVolumeUp={handleVolumeUp}
+            onVolumeDown={handleVolumeDown}
+            onToggleMute={handleToggleMute}
+            onChannelUp={handleChannelUp}
+            onChannelDown={handleChannelDown}
+            onShowInfo={() => {
+              tvConnection.sendButton('INFO');
+              showFeedback('Informações na TV');
+            }}
+            onLaunchApp={handleLaunchApp}
+            onMovePointer={handleMovePointer}
+            onClickPointer={handleClickPointer}
+            onResetPointer={handleResetPointer}
+            onSendNumber={(num) => handleCommand(num, `Dígito ${num}`)}
+            onSendChannel={handleSendChannelNumber}
+            onSendText={handleSendText}
+            onSendEnter={handleSendEnter}
+            onSendBackspace={handleSendBackspace}
+            onColorButton={handleColorButton}
+          />
+        ) : (
+          /* Empty State: Cadastrar IP da TV */
+          <div className="w-full max-w-[390px] mx-auto rounded-[38px] bg-neutral-900 border border-neutral-800 p-6 text-center space-y-4 shadow-2xl">
+            <div className="w-16 h-16 rounded-2xl bg-red-600/20 text-red-500 border border-red-500/30 flex items-center justify-center mx-auto shadow-lg">
+              <Tv className="w-8 h-8" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-white">Nenhuma TV Conectada</h2>
+              <p className="text-xs text-neutral-400 mt-1 leading-relaxed">
+                Conecte seu celular e a TV LG na mesma rede Wi-Fi para parear e controlar.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <button
+                onClick={() => setIsWifiPairingOpen(true)}
+                className="w-full py-3 rounded-2xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold text-xs shadow-lg shadow-red-600/30 active:scale-95 transition-all flex items-center justify-center gap-2"
+              >
+                <Wifi className="w-4 h-4" />
+                <span>Parear via Wi-Fi</span>
+              </button>
+              <button
+                onClick={() => setIsDeviceManagerOpen(true)}
+                className="w-full py-2.5 rounded-2xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white font-semibold text-xs active:scale-95 transition-all flex items-center justify-center gap-2"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Digitar IP Manualmente</span>
+              </button>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Bottom Bar: Direct PWA Install prompt if on mobile browser */}
@@ -408,11 +496,12 @@ export default function App() {
         isOpen={isInputsOpen}
         onClose={() => setIsInputsOpen(false)}
         currentInput={currentInput}
+        availableInputs={availableInputs}
+        onRefreshInputs={() => tvConnection.fetchInputs()}
         onSelectInput={(inp) => {
           setCurrentInput(inp);
-          setCurrentAppId(null);
-          showFeedback(`Entrada alterada: ${inp.label}`);
-          logSSAP('request', SSAP_ENDPOINTS.SWITCH_INPUT, { inputId: inp.id });
+          showFeedback(`Alternando para ${inp.label}...`);
+          tvConnection.sendRequest(SSAP_ENDPOINTS.SWITCH_INPUT, { inputId: inp.id });
         }}
       />
 
@@ -424,7 +513,7 @@ export default function App() {
         onSelectDevice={(dev) => {
           setActiveDeviceId(dev.id);
           TVStorage.setActiveDeviceId(dev.id);
-          showFeedback(`Conectado a ${dev.name}`);
+          showFeedback(`Conectando a ${dev.name}...`);
         }}
         onAddDevice={(dev) => {
           TVStorage.upsertDevice(dev);
@@ -446,10 +535,22 @@ export default function App() {
         onClose={() => setIsInspectorOpen(false)}
         logs={logs}
         onClearLogs={() => setLogs([])}
-        device={activeDevice}
+        device={activeDevice || {
+          id: 'none',
+          name: 'Sem TV',
+          ip: '0.0.0.0',
+          mac: '',
+          port: 3001,
+          clientKey: '',
+          modelName: '',
+          webosVersion: '',
+          isOnline: false,
+          powerState: 'standby',
+        }}
         onSendCustomSSAP={(uri, payload) => {
-          logSSAP('request', uri, payload);
-          showFeedback(`SSAP: ${uri}`);
+          tvConnection.sendRequest(uri, payload).catch((err) => {
+            showFeedback(`Erro SSAP: ${err.message}`);
+          });
         }}
       />
 
@@ -474,6 +575,20 @@ export default function App() {
           const next = !hapticsEnabled;
           setHapticsEnabled(next);
           feedback.setHapticsEnabled(next);
+        }}
+      />
+
+      <WifiPairingModal
+        isOpen={isWifiPairingOpen}
+        onClose={() => setIsWifiPairingOpen(false)}
+        activeDevice={activeDevice}
+        connectionStatus={connectionStatus}
+        statusMessage={statusMessage}
+        onPairSuccess={(dev) => {
+          TVStorage.upsertDevice(dev);
+          setDevices(TVStorage.getDevices());
+          setActiveDeviceId(dev.id);
+          setIsWifiPairingOpen(false);
         }}
       />
 

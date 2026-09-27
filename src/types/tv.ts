@@ -1,4 +1,5 @@
 export type PowerState = 'on' | 'standby' | 'turning_on';
+export type ConnectionStatus = 'disconnected' | 'connecting' | 'prompt_showing' | 'connected' | 'error';
 
 export interface TVDevice {
   id: string;

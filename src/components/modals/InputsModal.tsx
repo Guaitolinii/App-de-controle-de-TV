@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Tv, Gamepad2, Monitor, Radio, Cable, Check } from 'lucide-react';
+import { X, Tv, Gamepad2, Monitor, Radio, Cable, Check, RefreshCw } from 'lucide-react';
 import { InputSource } from '../../types/tv';
 import { DEFAULT_INPUTS } from '../../services/ssap';
 import { feedback } from '../../services/feedback';
@@ -8,6 +8,8 @@ interface InputsModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentInput: InputSource;
+  availableInputs?: InputSource[];
+  onRefreshInputs?: () => void;
   onSelectInput: (input: InputSource) => void;
 }
 
@@ -15,9 +17,13 @@ export const InputsModal: React.FC<InputsModalProps> = ({
   isOpen,
   onClose,
   currentInput,
+  availableInputs,
+  onRefreshInputs,
   onSelectInput,
 }) => {
   if (!isOpen) return null;
+
+  const inputs = (availableInputs && availableInputs.length > 0) ? availableInputs : DEFAULT_INPUTS;
 
   const getIcon = (type: string, id: string) => {
     if (id.includes('1')) return <Gamepad2 className="w-5 h-5 text-indigo-400" />;
@@ -29,25 +35,39 @@ export const InputsModal: React.FC<InputsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="relative w-full max-w-md bg-neutral-900 border border-white/10 rounded-2xl p-5 shadow-2xl space-y-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+      <div className="relative w-full max-w-md bg-neutral-900 border border-white/10 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-white/10">
           <div className="flex items-center gap-2">
             <Tv className="w-5 h-5 text-red-500" />
-            <h3 className="text-base font-bold text-white">Selecionar Entrada (HDMI)</h3>
+            <div>
+              <h3 className="text-base font-bold text-white">Selecionar Entrada (HDMI)</h3>
+              <p className="text-[11px] text-neutral-400">Portas físicas detectadas na TV</p>
+            </div>
           </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-lg bg-neutral-800 text-neutral-400 hover:text-white flex items-center justify-center transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            {onRefreshInputs && (
+              <button
+                onClick={onRefreshInputs}
+                title="Atualizar lista de entradas da TV"
+                className="p-1.5 rounded-lg bg-neutral-800 text-neutral-400 hover:text-white transition-colors"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-xl bg-neutral-800 text-neutral-400 hover:text-white flex items-center justify-center transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* Inputs List */}
         <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-          {DEFAULT_INPUTS.map((inp) => {
+          {inputs.map((inp) => {
             const isActive = currentInput.id === inp.id;
             return (
               <button
@@ -57,14 +77,14 @@ export const InputsModal: React.FC<InputsModalProps> = ({
                   onSelectInput(inp);
                   onClose();
                 }}
-                className={`w-full flex items-center justify-between p-3.5 rounded-xl border text-left transition-all active:scale-98 ${
+                className={`w-full flex items-center justify-between p-3.5 rounded-2xl border text-left transition-all active:scale-98 ${
                   isActive
                     ? 'bg-neutral-800/90 border-red-500 shadow-md ring-1 ring-red-500/30'
                     : 'bg-neutral-950/60 border-white/5 hover:bg-neutral-800/50 hover:border-white/15'
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-neutral-800 flex items-center justify-center border border-white/5">
+                  <div className="w-10 h-10 rounded-xl bg-neutral-800 flex items-center justify-center border border-white/5">
                     {getIcon(inp.type, inp.id)}
                   </div>
                   <div>
@@ -77,7 +97,7 @@ export const InputsModal: React.FC<InputsModalProps> = ({
                       )}
                     </div>
                     <p className="text-xs text-neutral-400 mt-0.5">
-                      {inp.connectedDevice}
+                      {inp.connectedDevice || inp.id}
                     </p>
                   </div>
                 </div>
