@@ -45,6 +45,20 @@ jobs:
       - name: Configurar Info.plist e ícone
         run: bash scripts/ios-configure.sh
 
+      - name: Resolver pacotes Swift (SPM)
+        run: |
+          mkdir -p build
+          cat ios/App/CapApp-SPM/Package.swift
+          set +e
+          xcodebuild -resolvePackageDependencies -project ios/App/App.xcodeproj -scheme App > build/spm.log 2>&1
+          status=$?
+          set -e
+          cat build/spm.log | tail -80
+          if [ $status -ne 0 ]; then
+            grep -A 12 "error:" build/spm.log | head -40 | while IFS= read -r line; do echo "::error::${line}"; done
+          fi
+          exit $status
+
       - name: Compilar sem assinatura
         run: |
           mkdir -p build
@@ -61,7 +75,7 @@ jobs:
           status=$?
           set -e
           # Erros de compilação viram anotações visíveis na página do build
-          grep -E "error:" build/xcodebuild.log | sort -u | head -30 | while IFS= read -r line; do
+          grep -A 6 -E "error:" build/xcodebuild.log | head -60 | while IFS= read -r line; do
             echo "::error::${line}"
           done
           tail -60 build/xcodebuild.log
