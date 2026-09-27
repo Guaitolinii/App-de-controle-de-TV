@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
-  <!-- Logo do app: versão com cantos arredondados (favicon e PWA) -->
+  <!-- Logo do app: versão quadrada sem transparência (ícone iOS e maskable Android) -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#1d1d29"/>
@@ -13,9 +13,7 @@
       <stop offset="0" stop-color="#fb4b6b"/>
       <stop offset="1" stop-color="#dc2626"/>
     </linearGradient>
-    <clipPath id="round"><rect width="1024" height="1024" rx="228"/></clipPath>
   </defs>
-  <g clip-path="url(#round)">
   <rect width="1024" height="1024" fill="url(#bg)"/>
   <!-- Brilho vermelho atrás da TV -->
   <circle cx="512" cy="540" r="430" fill="url(#glow)"/>
@@ -37,5 +35,4 @@
   </g>
   <!-- Botão OK -->
   <circle cx="512" cy="547" r="46" fill="url(#red)"/>
-  </g>
 </svg>

@@ -3,7 +3,7 @@
 # - Permissão de Rede Local (obrigatória para falar com a TV)
 # - Liberação de conexões sem TLS válido (TV usa ws://3000 e wss://3001 com certificado autoassinado)
 # - Somente retrato
-# - Ícone do app a partir de public/pwa-512x512.png
+# - Ícone do app a partir de public/icon-1024.png (logo quadrada, sem transparência)
 set -euo pipefail
 
 PLIST="ios/App/App/Info.plist"
@@ -34,10 +34,10 @@ set_key NSLocalNetworkUsageDescription string "O app precisa acessar a rede loca
 set_key UIStatusBarStyle string UIStatusBarStyleLightContent
 
 # Ícone 1024x1024 (o template do Capacitor usa um único arquivo AppIcon-512@2x.png)
-ICON_SRC="public/pwa-512x512.png"
+ICON_SRC="public/icon-1024.png"
 ICON_DST="ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png"
 if [ -f "$ICON_SRC" ] && [ -f "$ICON_DST" ]; then
-  sips -s format png -z 1024 1024 "$ICON_SRC" --out "$ICON_DST" >/dev/null
+  cp "$ICON_SRC" "$ICON_DST"
 fi
 
 echo "Info.plist configurado:"

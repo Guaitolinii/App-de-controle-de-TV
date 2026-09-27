@@ -361,9 +361,7 @@ export default function App() {
       {/* Top Mobile Bar */}
       <header className="w-full max-w-[420px] mx-auto flex items-center justify-between pb-2 pt-1 border-b border-white/5">
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-xl bg-gradient-to-tr from-red-600 to-rose-500 flex items-center justify-center shadow-md shadow-red-500/30">
-            <Tv className="w-3.5 h-3.5 text-white" />
-          </div>
+          <img src="/icon.svg" alt="" className="w-7 h-7 rounded-lg shadow-md shadow-red-500/30" />
           <div>
             <div className="flex items-center gap-1.5">
               <span className="text-xs font-black tracking-tight text-white">LG Smart Remote</span>
