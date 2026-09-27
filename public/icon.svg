@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#E50914" />
+      <stop offset="100%" stop-color="#831843" />
+    </linearGradient>
+    <linearGradient id="remoteGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2a2a36" />
+      <stop offset="100%" stop-color="#121218" />
+    </linearGradient>
+    <radialGradient id="dpadGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#3f3f50" />
+      <stop offset="100%" stop-color="#1e1e28" />
+    </radialGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.6"/>
+    </filter>
+  </defs>
+
+  <!-- Background rounded squircle -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
+
+  <!-- Remote Body -->
+  <g filter="url(#shadow)">
+    <rect x="156" y="56" width="200" height="400" rx="44" fill="url(#remoteGrad)" stroke="#ffffff" stroke-opacity="0.15" stroke-width="4" />
+    
+    <!-- Top Sensor Emitter -->
+    <rect x="226" y="70" width="60" height="6" rx="3" fill="#000000" />
+    <circle cx="256" cy="73" r="2" fill="#ef4444" />
+
+    <!-- Power button -->
+    <circle cx="196" cy="116" r="16" fill="#ef4444" />
+    <path d="M196 109 v7 M191 113 a6.5 6.5 0 1 0 10 0" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" fill="none" />
+
+    <!-- Setting & Input buttons -->
+    <circle cx="256" cy="116" r="12" fill="#333342" />
+    <circle cx="316" cy="116" r="12" fill="#333342" />
+
+    <!-- Circular D-Pad -->
+    <circle cx="256" cy="220" r="62" fill="url(#dpadGrad)" stroke="#525266" stroke-width="2" />
+    <!-- OK center -->
+    <circle cx="256" cy="220" r="26" fill="#181822" stroke="#ef4444" stroke-width="2.5" />
+    <circle cx="256" cy="220" r="4" fill="#ef4444" />
+    <!-- Arrows -->
+    <path d="M256 172 l-6 8 h12 z" fill="#ffffff" opacity="0.8" />
+    <path d="M256 268 l-6 -8 h12 z" fill="#ffffff" opacity="0.8" />
+    <path d="M208 220 l8 -6 v12 z" fill="#ffffff" opacity="0.8" />
+    <path d="M304 220 l-8 -6 v12 z" fill="#ffffff" opacity="0.8" />
+
+    <!-- Home & Back -->
+    <circle cx="196" cy="316" r="14" fill="#2d2d3a" />
+    <circle cx="316" cy="316" r="14" fill="#2d2d3a" />
+
+    <!-- Volume & Channel Rockers -->
+    <rect x="184" y="348" width="24" height="60" rx="12" fill="#22222c" stroke="#444455" stroke-width="1.5" />
+    <rect x="304" y="348" width="24" height="60" rx="12" fill="#22222c" stroke="#444455" stroke-width="1.5" />
+
+    <!-- Streaming 4 buttons -->
+    <rect x="220" y="356" width="32" height="18" rx="5" fill="#E50914" />
+    <rect x="260" y="356" width="32" height="18" rx="5" fill="#FF0000" />
+    <rect x="220" y="382" width="32" height="18" rx="5" fill="#00A8E1" />
+    <rect x="260" y="382" width="32" height="18" rx="5" fill="#1DB954" />
+
+    <!-- webOS branding -->
+    <text x="256" y="432" font-family="system-ui, -apple-system, sans-serif" font-size="10" font-weight="900" fill="#777788" text-anchor="middle" letter-spacing="3">LG webOS</text>
+  </g>
+</svg>

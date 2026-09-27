@@ -1,0 +1,14 @@
+{
+  "appId": "com.sintoniza.lgremote",
+  "appName": "LG Smart Remote",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "backgroundColor": "#0a0a0f"
+    }
+  }
+}

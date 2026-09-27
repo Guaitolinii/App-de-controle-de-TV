@@ -1,0 +1,6 @@
+{
+  "name": "LG Smart Remote - Controle Remoto webOS",
+  "description": "Aplicativo de controle remoto completo para Smart TVs LG webOS com conexão instantânea via WiFi, Wake-on-LAN, D-pad, atalhos de streaming, touchpad e teclado.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
