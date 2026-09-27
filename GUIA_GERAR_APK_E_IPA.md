@@ -18,13 +18,14 @@ Este aplicativo foi construído com comunicação direta via protocolo **SSAP (S
 
 ---
 
-## 🔒 2. Certificado da Porta 3001 (webOS 2022+ / TV Nova) e iOS
+## 🔒 2. Plugin nativo `LgTvBridge` (certificado da porta 3001, busca e Wake-on-LAN)
 
-- **O Problema:** As TVs LG modernas utilizam WebSocket Seguro na porta 3001 (`wss://IP:3001`) com um **certificado SSL autoassinado**. O WebKit do iOS/Safari recusa certificados autoassinados por padrão.
-- **A Solução:** O projeto já inclui o plugin nativo em Swift:
-  - Localização: `ios/App/App/LGWebsocketPlugin.swift`
-  - Ele implementa `URLSessionWebSocketDelegate` e valida o desafio de autenticação (`URLAuthenticationChallenge`) aceitando o certificado da TV local (`.useCredential, URLCredential(trust: serverTrust)`).
-  - Em TVs anteriores a 2022 ou quando a porta 3001 não estiver ativa, o app possui fallback automático para a porta 3000 (`ws://IP:3000`).
+- **O problema:** as TVs LG modernas usam `wss://IP:3001` com **certificado autoassinado**, que o WebView do iOS recusa. O WebView também não envia UDP (Wake-on-LAN) nem descobre o IP do Wi-Fi.
+- **A solução:** plugin Capacitor local em `plugins/lg-tv-bridge` (instalado via `file:` no `package.json`):
+  - `ios/Sources/LgTvBridgePlugin/LgTvBridgePlugin.swift`: WebSocket nativo (`URLSessionWebSocketTask`) que aceita o certificado **somente de IPs da rede local**, sondagem TCP das portas 3001/3000, envio UDP e leitura do IP/máscara do Wi-Fi.
+  - `src/services/tvSocket.ts` usa o plugin no app iOS e o `WebSocket` do navegador no desenvolvimento.
+  - A conexão tenta `wss://IP:3001` e, se falhar, `ws://IP:3000` (TVs anteriores a 2022). A porta que funcionou fica salva.
+- **Busca de TVs:** o app lê a faixa do Wi-Fi do celular e testa os 254 endereços por TCP (sem multicast, então funciona no iOS sem entitlement). Na primeira vez o iOS pede permissão de **Rede Local**.
 
 ---
 
@@ -78,26 +79,27 @@ cd android
 
 ---
 
-## 🍎 6. Como Gerar o IPA (.ipa) para iPhone (iOS)
+## 🍎 6. Como gerar o IPA (.ipa) para iPhone sem ter Mac
 
-\`\`\`bash
-# 1. Compilar os arquivos do app
-npm run build
+O workflow `.github/workflows/ios.yml` roda num Mac do GitHub a cada push na `main` (ou manualmente em **Actions → Build iOS (IPA) → Run workflow**):
 
-# 2. Adicionar o projeto iOS
-npx cap add ios
-npx cap sync ios
+1. `npm ci` e `npm run build`
+2. `npx cap add ios` (gera o projeto Xcode; a pasta `ios/` não fica no repositório)
+3. `scripts/ios-configure.sh` (permissão de Rede Local, ATS liberado para a TV, retrato, ícone)
+4. `xcodebuild` sem assinatura e empacotamento em `LG-Smart-Remote.ipa`
+5. Publica o IPA em **Releases** (link fixo da última versão):
+   `https://github.com/Guaitolinii/App-de-controle-de-TV/releases/latest/download/LG-Smart-Remote.ipa`
 
-# 3. Abrir no Xcode:
-npx cap open ios
-\`\`\`
+### Instalar no iPhone com o Sideloadly (Windows ou Mac)
+1. Baixe o `LG-Smart-Remote.ipa` pelo link acima.
+2. Conecte o iPhone no computador, abra o **Sideloadly** e arraste o IPA.
+3. Informe seu Apple ID e clique em **Start**.
+4. No iPhone: **Ajustes → Geral → VPN e Gerenciamento de Dispositivo** → confie no seu Apple ID. No iOS 16+ ative também **Ajustes → Privacidade e Segurança → Modo de Desenvolvedor**.
+5. Ao abrir o app, aceite o pedido de acesso à **Rede Local**.
 
-### No Xcode:
-1. Conecte seu iPhone via cabo ao Mac.
-2. Na aba **Signing & Capabilities**, selecione seu Apple ID gratuito.
-3. No arquivo `Info.plist`, a permissão `NSLocalNetworkUsageDescription` e `NSAllowsLocalNetworking` já estão preenchidas.
-4. Clique em **Run (▶)** para instalar e testar diretamente no seu iPhone!
-5. Para exportar o arquivo `.ipa`:
-   - Selecione **Any iOS Device (arm64)** no topo.
-   - Vá no menu **Product > Archive**.
-   - Na janela Organizer, clique em **Distribute App** > **Development / Ad Hoc** > **Export** para salvar o binário `.ipa`.
+> Com Apple ID gratuito o app expira em 7 dias (reinstale pelo Sideloadly; o pareamento com a TV continua salvo) e vale o limite de 3 apps instalados assim.
+
+### Na TV (uma vez)
+- **Configurações → Geral → Dispositivos → Configurações de dispositivo externo** (o caminho varia por ano): ative **LG Connect Apps** e **Ligar via Wi-Fi**.
+- Ative o **Quick Start+** para a TV aceitar o comando de ligar em standby.
+- O app aprende o MAC da TV na primeira conexão (com a TV ligada). Depois disso o botão Power tenta ligá-la pela rede.

@@ -6,6 +6,8 @@ export interface TVDevice {
   name: string;
   ip: string;
   mac: string;
+  /** Todos os MACs informados pela TV (cabo e Wi-Fi); o Wake-on-LAN envia para cada um */
+  macs?: string[];
   port: number;
   clientKey: string;
   modelName: string;

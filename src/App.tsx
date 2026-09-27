@@ -21,9 +21,9 @@ import {
 } from 'lucide-react';
 import { ChannelInfo, ConnectionStatus, InputSource, PowerState, SSAPMessage, TVDevice } from './types/tv';
 import { TVStorage } from './services/storage';
-import { DEFAULT_CHANNELS, DEFAULT_INPUTS, SSAP_ENDPOINTS } from './services/ssap';
+import { DEFAULT_CHANNELS, SSAP_ENDPOINTS } from './services/ssap';
 import { tvConnection } from './services/tvConnection';
-import { WakeOnLanService } from './services/wol';
+import { isNativeApp } from './services/nativeBridge';
 import { feedback } from './services/feedback';
 import { RemoteBody } from './components/remote/RemoteBody';
 import { InputsModal } from './components/modals/InputsModal';
@@ -47,8 +47,8 @@ export default function App() {
   const [volume, setVolume] = useState<number>(0);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [currentChannel, setCurrentChannel] = useState<ChannelInfo>(DEFAULT_CHANNELS[0]);
-  const [availableInputs, setAvailableInputs] = useState<InputSource[]>(DEFAULT_INPUTS);
-  const [currentInput, setCurrentInput] = useState<InputSource>(DEFAULT_INPUTS[0]);
+  const [availableInputs, setAvailableInputs] = useState<InputSource[]>([]);
+  const [currentInput, setCurrentInput] = useState<InputSource | null>(null);
   const [currentAppId, setCurrentAppId] = useState<string | null>(null);
   const [homeMenuOpen, setHomeMenuOpen] = useState<boolean>(false);
   const [lastActionStatus, setLastActionStatus] = useState<string | null>(null);
@@ -88,12 +88,31 @@ export default function App() {
       }
     });
 
-    const unsubKey = tvConnection.onClientKey((key) => {
-      if (activeDevice) {
-        TVStorage.updateClientKey(activeDevice.id, key);
-        setDevices(TVStorage.getDevices());
-        setLastActionStatus('Chave de pareamento salva com sucesso!');
+    // Chave de pareamento recebida da TV: salva no aparelho que estava conectando
+    const unsubKey = tvConnection.onClientKey(({ deviceId, clientKey }) => {
+      TVStorage.updateClientKey(deviceId, clientKey);
+      setDevices(TVStorage.getDevices());
+      setLastActionStatus('Pareamento salvo. Não será preciso permitir de novo.');
+    });
+
+    // Modelo, versão do webOS, porta que funcionou e MACs (usados para ligar a TV)
+    const unsubInfo = tvConnection.onDeviceInfo((info) => {
+      const saved = TVStorage.getDevices().find((d) => d.id === info.deviceId);
+      if (!saved) return;
+      const changes: Partial<TVDevice> = { isOnline: true, lastConnected: Date.now() };
+      if (info.port) changes.port = info.port;
+      if (info.modelName) changes.modelName = info.modelName;
+      if (info.webosVersion) changes.webosVersion = info.webosVersion;
+      if (info.macs?.length) {
+        changes.macs = info.macs;
+        changes.mac = info.macs[0];
       }
+      // Nome automático: troca "LG TV (IP)" pelo modelo real
+      if (info.modelName && /^LG (Smart )?TV( \(|$)/.test(saved.name)) {
+        changes.name = `LG ${info.modelName}`;
+      }
+      TVStorage.updateDevice(info.deviceId, changes);
+      setDevices(TVStorage.getDevices());
     });
 
     const unsubVol = tvConnection.onVolume(({ volume: vol, muted }) => {
@@ -122,12 +141,26 @@ export default function App() {
     return () => {
       unsubStatus();
       unsubKey();
+      unsubInfo();
       unsubVol();
       unsubApp();
       unsubInputs();
       unsubLogs();
     };
-  }, [activeDevice]);
+  }, []);
+
+  // Ao voltar do segundo plano o iOS derruba as conexões: reconecta
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') tvConnection.reconnectIfNeeded();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', onVisible);
+    };
+  }, []);
 
   // Connect automatically to active device when selected
   useEffect(() => {
@@ -162,24 +195,12 @@ export default function App() {
         showFeedback(`Erro ao desligar: ${err.message}`);
       }
     } else {
-      // TV desligada/em standby: enviar Wake-on-LAN Magic Packet real
-      if (!activeDevice.mac) {
-        showFeedback('Cadastre o MAC da TV em "Gerenciar TVs" para ligar via Wake-on-LAN.');
+      // TV desligada/em standby: Wake-on-LAN (IP da TV + broadcast) e reconexão
+      showFeedback('Enviando sinal para ligar a TV...');
+      const result = await tvConnection.wake(activeDevice);
+      showFeedback(result.message);
+      if (result.sent === 0 && result.supported && !activeDevice.mac && !activeDevice.macs?.length) {
         setIsDeviceManagerOpen(true);
-        return;
-      }
-
-      showFeedback(`Enviando Magic Packet WoL para ${activeDevice.mac}...`);
-      try {
-        // Gera o pacote de 102 bytes
-        const packet = WakeOnLanService.createMagicPacket(activeDevice.mac);
-        showFeedback(`Pacote WoL de ${packet.length} bytes gerado. Conectando...`);
-        // Tenta reconexão por WebSocket
-        setTimeout(() => {
-          tvConnection.connect(activeDevice);
-        }, 3000);
-      } catch (err: any) {
-        showFeedback(`Erro no WoL: ${err.message}`);
       }
     }
   };
@@ -198,7 +219,7 @@ export default function App() {
     ].includes(cmd);
 
     if (isPointerButton) {
-      tvConnection.sendButton(cmd);
+      if (!tvConnection.sendButton(cmd)) showFeedback('TV não conectada');
       return;
     }
 
@@ -274,7 +295,7 @@ export default function App() {
   const handleLaunchApp = (appId: string, appName?: string) => {
     feedback.playClick('app');
     showFeedback(`Abrindo ${appName || appId}...`);
-    tvConnection.sendRequest(SSAP_ENDPOINTS.LAUNCH, { id: appId }).catch((err) => {
+    tvConnection.launchApp(appId, appName).catch((err) => {
       showFeedback(`Não foi possível abrir ${appName || appId}: ${err.message}`);
     });
   };
@@ -324,8 +345,12 @@ export default function App() {
     tvConnection.sendButton(color);
   };
 
-  const handleSendWol = (mac: string) => {
-    showFeedback(`Magic Packet enviado para ${mac}`);
+  // Teste de Wake-on-LAN pelo gerenciador de TVs
+  const handleSendWol = async (mac: string) => {
+    const device = devices.find((d) => d.mac === mac || d.macs?.includes(mac)) || activeDevice;
+    if (!device) return;
+    const result = await tvConnection.wake({ ...device, mac });
+    showFeedback(result.message);
   };
 
   const isPaired = !!activeDevice?.clientKey;
@@ -349,7 +374,8 @@ export default function App() {
           </div>
         </div>
 
-        {/* Action Button: Mobile Install APK / IPA */}
+        {/* Action Button: Mobile Install APK / IPA (só no navegador; no app instalado não faz sentido) */}
+        {!isNativeApp() && (
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => {
@@ -363,6 +389,7 @@ export default function App() {
             <span>Testar no Celular (APK/IPA)</span>
           </button>
         </div>
+        )}
       </header>
 
       {/* PAIRING PROMPT BANNER (Quando a TV mostra "Permitir" na tela) */}
@@ -501,7 +528,9 @@ export default function App() {
         onSelectInput={(inp) => {
           setCurrentInput(inp);
           showFeedback(`Alternando para ${inp.label}...`);
-          tvConnection.sendRequest(SSAP_ENDPOINTS.SWITCH_INPUT, { inputId: inp.id });
+          tvConnection.sendRequest(SSAP_ENDPOINTS.SWITCH_INPUT, { inputId: inp.id }).catch((err) => {
+            showFeedback(`Não foi possível trocar a entrada: ${err.message}`);
+          });
         }}
       />
 

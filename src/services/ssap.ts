@@ -49,6 +49,7 @@ export const SSAP_ENDPOINTS = {
   LAUNCH: 'ssap://system.launcher/launch',
   CLOSE: 'ssap://system.launcher/close',
   LIST_APPS: 'ssap://com.webos.applicationManager/listApps',
+  LIST_LAUNCH_POINTS: 'ssap://com.webos.applicationManager/listLaunchPoints',
   GET_FOREGROUND_APP: 'ssap://com.webos.applicationManager/getForegroundAppInfo',
   GET_APP_STATE: 'ssap://system.launcher/getAppState',
 
@@ -56,6 +57,8 @@ export const SSAP_ENDPOINTS = {
   CREATE_TOAST: 'ssap://system.notifications/createToast',
   TURN_OFF: 'ssap://system/turnOff',
   GET_SYSTEM_INFO: 'ssap://system/getSystemInfo',
+  GET_SW_INFO: 'ssap://com.webos.service.update/getCurrentSWInformation',
+  GET_NETWORK_INFO: 'ssap://com.webos.service.connectionmanager/getinfo',
   GET_SERVICES: 'ssap://api/getServiceList',
   INPUT_INSERT_TEXT: 'ssap://com.webos.service.ime/insertText',
   INPUT_ENTER: 'ssap://com.webos.service.ime/sendEnterKey',

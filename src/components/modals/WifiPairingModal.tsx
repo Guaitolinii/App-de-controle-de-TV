@@ -17,6 +17,8 @@ import {
 import { ConnectionStatus, TVDevice } from '../../types/tv';
 import { tvConnection } from '../../services/tvConnection';
 import { WifiDiscoveryService, DiscoveredTV } from '../../services/wifiDiscovery';
+import { TVStorage } from '../../services/storage';
+import { subnetPrefix } from '../../services/network';
 import { feedback } from '../../services/feedback';
 
 interface WifiPairingModalProps {
@@ -43,7 +45,24 @@ export const WifiPairingModal: React.FC<WifiPairingModalProps> = ({
   const [scanProgress, setScanProgress] = useState({ scanned: 0, total: 0 });
   const [discoveredTvs, setDiscoveredTvs] = useState<DiscoveredTV[]>([]);
   const [subnetBase, setSubnetBase] = useState('192.168.1');
+  const [subnetLabel, setSubnetLabel] = useState('');
+  const [scanDone, setScanDone] = useState(false);
   const [showIpHelp, setShowIpHelp] = useState(false);
+
+  // No app nativo: descobre a faixa do Wi-Fi e já provoca o pedido de "Rede Local" do iOS
+  useEffect(() => {
+    if (!isOpen || !WifiDiscoveryService.canAutoDetectSubnet()) return;
+    WifiDiscoveryService.getLocalNetwork().then((net) => {
+      if (net) {
+        const prefix = subnetPrefix(net.ip);
+        if (prefix) {
+          setSubnetBase(prefix);
+          setSubnetLabel(`${prefix}.x`);
+        }
+      }
+    });
+    WifiDiscoveryService.requestLocalNetworkPermission();
+  }, [isOpen]);
 
   useEffect(() => {
     if (activeDevice) {
@@ -62,15 +81,20 @@ export const WifiPairingModal: React.FC<WifiPairingModalProps> = ({
     feedback.playClick('standard');
     const finalPort = targetPort || port;
 
+    // Mesmo IP já cadastrado: reaproveita o cadastro e a chave (não pede "Permitir" de novo).
+    // IP novo: cria outro aparelho, sem sobrescrever a TV ativa.
+    const existing = TVStorage.findByIp(finalIp);
+    const typedName = tvName.trim();
     const deviceToPair: TVDevice = {
-      id: activeDevice?.id || `tv_${Date.now()}`,
-      name: tvName.trim() || `LG TV (${finalIp})`,
+      id: existing?.id || `tv_${Date.now()}`,
+      name: typedName && typedName !== 'LG Smart TV' ? typedName : existing?.name || `LG TV (${finalIp})`,
       ip: finalIp,
-      mac: activeDevice?.mac || '',
+      mac: existing?.mac || '',
+      macs: existing?.macs,
       port: finalPort,
-      clientKey: '', // Força envio do handshake sem chave para que a TV exiba o popup "Permitir"
-      modelName: finalPort === 3001 ? 'webOS 2022+ (wss)' : 'webOS Legado (ws)',
-      webosVersion: 'webOS',
+      clientKey: existing?.clientKey || '',
+      modelName: existing?.modelName || 'webOS Smart TV',
+      webosVersion: existing?.webosVersion || 'webOS',
       isOnline: false,
       powerState: 'standby',
       lastConnected: Date.now(),
@@ -83,13 +107,18 @@ export const WifiPairingModal: React.FC<WifiPairingModalProps> = ({
   const handleScanWifi = async () => {
     feedback.playClick('standard');
     setIsScanning(true);
+    setScanDone(false);
     setDiscoveredTvs([]);
 
     try {
-      const results = await WifiDiscoveryService.scanSubnet(subnetBase, (scanned, total, found) => {
+      // No navegador usa a faixa do IP digitado (se houver)
+      const base = subnetPrefix(ip) || subnetBase;
+      const { found: results, subnetLabel: label } = await WifiDiscoveryService.scan(base, (scanned, total, found) => {
         setScanProgress({ scanned, total });
         setDiscoveredTvs([...found]);
       });
+      setSubnetLabel(label);
+      setDiscoveredTvs(results);
       if (results.length > 0) {
         setIp(results[0].ip);
         setPort(results[0].port);
@@ -98,6 +127,7 @@ export const WifiPairingModal: React.FC<WifiPairingModalProps> = ({
       console.error(e);
     } finally {
       setIsScanning(false);
+      setScanDone(true);
     }
   };
 
@@ -280,7 +310,7 @@ export const WifiPairingModal: React.FC<WifiPairingModalProps> = ({
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-xs font-bold text-white block">Não sabe o IP exato?</span>
-                  <span className="text-[10px] text-neutral-400">Escanear faixa Wi-Fi local ({subnetBase}.X)</span>
+                  <span className="text-[10px] text-neutral-400">Escanear faixa Wi-Fi local ({subnetLabel || `${subnetPrefix(ip) || subnetBase}.x`})</span>
                 </div>
                 <button
                   onClick={handleScanWifi}
@@ -304,6 +334,15 @@ export const WifiPairingModal: React.FC<WifiPairingModalProps> = ({
                     <span>Verificando portas 3001/3000...</span>
                     <span>{scanProgress.scanned}/{scanProgress.total}</span>
                   </div>
+                </div>
+              )}
+
+              {/* Nenhuma TV encontrada */}
+              {scanDone && !isScanning && discoveredTvs.length === 0 && (
+                <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200 leading-relaxed">
+                  Nenhuma TV encontrada. Confira se a TV está ligada, no mesmo Wi-Fi, e se o iPhone tem
+                  permissão de <strong>Rede Local</strong> (Ajustes → Privacidade e Segurança → Rede Local). Depois busque de novo
+                  ou digite o IP.
                 </div>
               )}
 

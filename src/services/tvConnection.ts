@@ -1,26 +1,110 @@
 import { ConnectionStatus, InputSource, SSAPMessage, TVDevice } from '../types/tv';
-import { SSAP_ENDPOINTS, SSAP_PERMISSIONS } from './ssap';
+import { SSAP_ENDPOINTS } from './ssap';
+import { TvSocket, openTvSocket } from './tvSocket';
+import { WakeOnLanService } from './wol';
 
 type EventListener<T> = (data: T) => void;
 
+/** Informações lidas da TV depois do pareamento (salvas no cadastro do aparelho). */
+export interface TVDeviceInfo {
+  deviceId: string;
+  port?: number;
+  modelName?: string;
+  webosVersion?: string;
+  macs?: string[];
+}
+
+/** App instalado na TV (lista de launch points). */
+export interface TVLaunchPoint {
+  id: string;
+  title: string;
+}
+
+/**
+ * Permissões pedidas no pareamento. Manifesto sem assinatura, o mesmo formato usado pela
+ * biblioteca aiowebostv (Home Assistant), aceito pelas TVs webOS atuais.
+ */
+const REGISTRATION_PERMISSIONS = [
+  'APP_TO_APP',
+  'CLOSE',
+  'CONTROL_AUDIO',
+  'CONTROL_DISPLAY',
+  'CONTROL_INPUT_JOYSTICK',
+  'CONTROL_INPUT_MEDIA_PLAYBACK',
+  'CONTROL_INPUT_MEDIA_RECORDING',
+  'CONTROL_INPUT_TEXT',
+  'CONTROL_INPUT_TV',
+  'CONTROL_MOUSE_AND_KEYBOARD',
+  'CONTROL_POWER',
+  'CONTROL_TV_SCREEN',
+  'LAUNCH',
+  'LAUNCH_WEBAPP',
+  'READ_APP_STATUS',
+  'READ_COUNTRY_INFO',
+  'READ_CURRENT_CHANNEL',
+  'READ_INPUT_DEVICE_LIST',
+  'READ_INSTALLED_APPS',
+  'READ_LGE_SDX',
+  'READ_LGE_TV_INPUT_EVENTS',
+  'READ_NETWORK_STATE',
+  'READ_NOTIFICATIONS',
+  'READ_POWER_STATE',
+  'READ_RUNNING_APPS',
+  'READ_SETTINGS',
+  'READ_TV_CHANNEL_LIST',
+  'READ_TV_CURRENT_TIME',
+  'READ_UPDATE_INFO',
+  'SEARCH',
+  'TEST_OPEN',
+  'TEST_PROTECTED',
+  'TEST_SECURE',
+  'UPDATE_FROM_REMOTE_APP',
+  'WRITE_NOTIFICATION_ALERT',
+  'WRITE_NOTIFICATION_TOAST',
+  'WRITE_SETTINGS',
+];
+
+/** Monta a URL do socket principal conforme a porta */
+function buildTvUrl(ip: string, port: number): string {
+  return port === 3001 ? `wss://${ip}:3001` : `ws://${ip}:3000`;
+}
+
+/** Normaliza um MAC para AA:BB:CC:DD:EE:FF (ou retorna null se inválido) */
+function normalizeMac(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const clean = value.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+  if (clean.length !== 12 || clean === '000000000000') return null;
+  return clean.match(/.{2}/g)!.join(':');
+}
+
 export class TVConnection {
   private static instance: TVConnection;
-  private ws: WebSocket | null = null;
-  private pointerWs: WebSocket | null = null;
+  private ws: TvSocket | null = null;
+  private pointerWs: TvSocket | null = null;
+  private pointerOpening: Promise<TvSocket | null> | null = null;
   private currentDevice: TVDevice | null = null;
   private status: ConnectionStatus = 'disconnected';
   private reqCounter = 0;
+  private connectAttempt = 0;
   private pendingRequests = new Map<string, { resolve: (val: any) => void; reject: (err: any) => void; timeout: ReturnType<typeof setTimeout> }>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectDelayMs = 3000;
   private isIntentionalDisconnect = false;
-  private fallbackAttempted = false;
+  private registerId: string | null = null;
+  private volumeSubId: string | null = null;
+  private appSubId: string | null = null;
+  private launchPoints: TVLaunchPoint[] = [];
+  // Resto fracionário do movimento do touchpad (a TV só aceita inteiros)
+  private pointerRemainder = { x: 0, y: 0 };
 
-  // Event Subscriptions
+  // Assinaturas de eventos
   private statusListeners = new Set<EventListener<{ status: ConnectionStatus; message?: string }>>();
-  private clientKeyListeners = new Set<EventListener<string>>();
+  private clientKeyListeners = new Set<EventListener<{ deviceId: string; clientKey: string }>>();
+  private deviceInfoListeners = new Set<EventListener<TVDeviceInfo>>();
   private volumeListeners = new Set<EventListener<{ volume: number; muted: boolean }>>();
   private appListeners = new Set<EventListener<string | null>>();
   private inputsListeners = new Set<EventListener<InputSource[]>>();
+  private launchPointListeners = new Set<EventListener<TVLaunchPoint[]>>();
   private rawLogListeners = new Set<EventListener<SSAPMessage>>();
 
   private constructor() {}
@@ -32,16 +116,22 @@ export class TVConnection {
     return TVConnection.instance;
   }
 
-  // Event Subscription Helpers
+  // ---------- Assinaturas de eventos ----------
+
   onStatusChange(listener: EventListener<{ status: ConnectionStatus; message?: string }>) {
     this.statusListeners.add(listener);
     listener({ status: this.status });
     return () => this.statusListeners.delete(listener);
   }
 
-  onClientKey(listener: EventListener<string>) {
+  onClientKey(listener: EventListener<{ deviceId: string; clientKey: string }>) {
     this.clientKeyListeners.add(listener);
     return () => this.clientKeyListeners.delete(listener);
+  }
+
+  onDeviceInfo(listener: EventListener<TVDeviceInfo>) {
+    this.deviceInfoListeners.add(listener);
+    return () => this.deviceInfoListeners.delete(listener);
   }
 
   onVolume(listener: EventListener<{ volume: number; muted: boolean }>) {
@@ -59,6 +149,11 @@ export class TVConnection {
     return () => this.inputsListeners.delete(listener);
   }
 
+  onLaunchPoints(listener: EventListener<TVLaunchPoint[]>) {
+    this.launchPointListeners.add(listener);
+    return () => this.launchPointListeners.delete(listener);
+  }
+
   onRawLog(listener: EventListener<SSAPMessage>) {
     this.rawLogListeners.add(listener);
     return () => this.rawLogListeners.delete(listener);
@@ -69,7 +164,13 @@ export class TVConnection {
     this.statusListeners.forEach((l) => l({ status, message }));
   }
 
-  private logRaw(direction: 'outgoing' | 'incoming' | 'system', type: any, payload: any, uri?: string, latencyMs?: number) {
+  private logRaw(
+    direction: 'outgoing' | 'incoming' | 'system',
+    type: SSAPMessage['type'],
+    payload: any,
+    uri?: string,
+    status: SSAPMessage['status'] = 'ok'
+  ) {
     const log: SSAPMessage = {
       id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       timestamp: Date.now(),
@@ -77,8 +178,7 @@ export class TVConnection {
       type,
       uri,
       payload,
-      status: 'ok',
-      latencyMs,
+      status,
     };
     this.rawLogListeners.forEach((l) => l(log));
   }
@@ -91,373 +191,500 @@ export class TVConnection {
     return this.currentDevice;
   }
 
+  public isConnected(): boolean {
+    return this.status === 'connected' && !!this.ws?.isOpen();
+  }
+
+  // ---------- Conexão ----------
+
   /**
-   * Conecta à TV LG via WebSocket:
-   * Tenta porta 3001 (WSS - webOS 2022 em diante)
-   * Se recusada por certificado ou TV antiga, tenta porta 3000 (WS)
+   * Conecta à TV LG:
+   * tenta primeiro a porta salva (ou 3001/WSS, padrão das TVs 2022+) e depois a outra (3000/WS).
+   * Chamadas repetidas cancelam a tentativa anterior.
    */
   async connect(device: TVDevice): Promise<void> {
-    this.currentDevice = device;
+    this.currentDevice = { ...device };
     this.isIntentionalDisconnect = false;
-    this.fallbackAttempted = false;
-
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-
+    this.clearReconnectTimer();
+    const attempt = ++this.connectAttempt;
     this.closeSockets();
 
-    const cleanIp = device.ip.trim();
-    if (!cleanIp) {
+    const ip = device.ip.trim();
+    if (!ip) {
       this.setStatus('error', 'Endereço IP não informado');
       return;
     }
 
-    const port = device.port || 3001;
-    const protocol = port === 3001 ? 'wss' : 'ws';
-    const wsUrl = `${protocol}://${cleanIp}:${port}`;
+    const ports = device.port === 3000 ? [3000, 3001] : [3001, 3000];
+    this.setStatus('connecting', `Conectando a ${device.name || ip}...`);
 
-    this.setStatus('connecting', `Conectando a ${wsUrl}...`);
-    this.logRaw('system', 'request', { url: wsUrl }, wsUrl);
+    for (const port of ports) {
+      const url = buildTvUrl(ip, port);
+      this.logRaw('system', 'request', { action: 'connect', url }, url);
+      try {
+        const socket = await openTvSocket(
+          url,
+          {
+            onMessage: (data) => {
+              if (attempt === this.connectAttempt) this.handleMessage(data);
+            },
+            onClose: (reason) => this.handleMainClose(attempt, reason),
+          },
+          5000
+        );
 
-    try {
-      this.ws = new WebSocket(wsUrl);
-
-      this.ws.onopen = () => {
-        this.logRaw('incoming', 'response', { status: 'Socket aberto com sucesso' }, wsUrl);
-        this.sendHandshakeRegister();
-      };
-
-      this.ws.onmessage = (event) => {
-        this.handleMessage(event.data);
-      };
-
-      this.ws.onerror = (err) => {
-        console.warn('Erro no WebSocket da TV:', err);
-        // Fallback automático de porta 3001 (WSS) para 3000 (WS) para TVs anteriores a 2022
-        if (port === 3001 && !this.fallbackAttempted) {
-          this.fallbackAttempted = true;
-          this.logRaw('system', 'error', { 
-            message: 'Porta 3001 (WSS) falhou. Tentando porta 3000 (WS legado)...' 
-          });
-          this.connect({ ...device, port: 3000 });
+        // Outra tentativa começou enquanto esta abria: descarta
+        if (attempt !== this.connectAttempt) {
+          socket.close();
           return;
         }
-        this.setStatus('error', 'Falha ao conectar. Verifique IP e se a TV está ligada na mesma rede.');
-      };
 
-      this.ws.onclose = (event) => {
-        this.closePointerSocket();
-        if (!this.isIntentionalDisconnect) {
-          this.setStatus('disconnected', 'Conexão encerrada');
-          this.scheduleReconnect();
-        }
-      };
-    } catch (e: any) {
-      this.setStatus('error', e.message || 'Erro ao inicializar WebSocket');
+        this.ws = socket;
+        this.currentDevice.port = port;
+        this.logRaw('incoming', 'response', { status: 'Socket aberto', url }, url);
+        this.sendHandshakeRegister();
+        return;
+      } catch (err: any) {
+        if (attempt !== this.connectAttempt) return;
+        this.logRaw('system', 'error', { url, message: err?.message || String(err) }, url, 'error');
+      }
+    }
+
+    if (attempt !== this.connectAttempt) return;
+    this.setStatus(
+      'error',
+      'TV não respondeu. Confira se ela está ligada, na mesma rede Wi-Fi e com "LG Connect Apps" ativado.'
+    );
+    this.scheduleReconnect();
+  }
+
+  /** Socket principal caiu (TV desligou, Wi-Fi caiu, app foi para segundo plano...) */
+  private handleMainClose(attempt: number, reason: string) {
+    if (attempt !== this.connectAttempt) return;
+    this.ws = null;
+    this.closePointerSocket();
+    this.rejectAllPending('Conexão com a TV encerrada');
+    this.logRaw('system', 'error', { message: reason }, undefined, 'error');
+    if (!this.isIntentionalDisconnect) {
+      this.setStatus('disconnected', 'Conexão com a TV encerrada. Reconectando...');
+      this.scheduleReconnect();
     }
   }
 
   private closeSockets() {
     if (this.ws) {
-      this.ws.onclose = null;
-      this.ws.onerror = null;
       this.ws.close();
       this.ws = null;
     }
     this.closePointerSocket();
+    this.rejectAllPending('Conexão reiniciada');
+    this.registerId = null;
+    this.volumeSubId = null;
+    this.appSubId = null;
   }
 
   private closePointerSocket() {
     if (this.pointerWs) {
-      this.pointerWs.onclose = null;
-      this.pointerWs.onerror = null;
       this.pointerWs.close();
       this.pointerWs = null;
     }
+    this.pointerOpening = null;
+  }
+
+  private rejectAllPending(message: string) {
+    this.pendingRequests.forEach((pending) => {
+      clearTimeout(pending.timeout);
+      pending.reject(new Error(message));
+    });
+    this.pendingRequests.clear();
   }
 
   public disconnect() {
     this.isIntentionalDisconnect = true;
+    this.connectAttempt++;
+    this.clearReconnectTimer();
+    this.closeSockets();
+    this.setStatus('disconnected', 'Desconectado');
+  }
+
+  /** Reconecta se a conexão não estiver ativa (ex.: app voltou do segundo plano) */
+  public reconnectIfNeeded() {
+    if (!this.currentDevice || this.isIntentionalDisconnect) return;
+    if (this.status === 'connecting' || this.status === 'prompt_showing') return;
+    if (!this.isConnected()) {
+      this.reconnectDelayMs = 3000;
+      this.connect(this.currentDevice);
+    }
+  }
+
+  private clearReconnectTimer() {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    this.closeSockets();
-    this.setStatus('disconnected', 'Desconectado manualmente');
   }
 
+  /** Nova tentativa com espera crescente (3 s até 20 s) */
   private scheduleReconnect() {
     if (this.isIntentionalDisconnect || !this.currentDevice) return;
+    this.clearReconnectTimer();
+    const delay = this.reconnectDelayMs;
+    this.reconnectDelayMs = Math.min(this.reconnectDelayMs * 2, 20000);
     this.reconnectTimer = setTimeout(() => {
       if (this.currentDevice && !this.isIntentionalDisconnect) {
         this.connect(this.currentDevice);
       }
-    }, 4000);
+    }, delay);
   }
 
+  // ---------- Pareamento ----------
+
   /**
-   * Envia o pedido oficial de registro/pareamento SSAP.
-   * Se já possuir client-key, a conexão é aceita imediatamente.
-   * Se não possuir, a TV exibirá na tela o aviso "Permitir?".
+   * Envia o pedido de registro SSAP.
+   * Com client-key salva a TV aceita direto; sem ela a TV mostra "Permitir?" na tela.
    */
   private sendHandshakeRegister() {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    if (!this.ws) return;
 
     const savedKey = this.currentDevice?.clientKey?.trim();
-    const registerId = `register_${++this.reqCounter}`;
+    this.registerId = `register_${++this.reqCounter}`;
 
-    const payload = {
-      type: 'register',
-      id: registerId,
-      payload: {
-        forcePairing: false,
-        pairingType: 'PROMPT',
-        'client-key': savedKey || undefined,
-        manifest: {
-          appVersion: '1.0.0',
-          manifestVersion: 1,
-          permissions: SSAP_PERMISSIONS,
-          signatures: [
-            {
-              signatureVersion: 1,
-              signature: 'eyJhbGdvcm...',
-            },
-          ],
-        },
+    const payload: Record<string, any> = {
+      forcePairing: false,
+      pairingType: 'PROMPT',
+      manifest: {
+        appVersion: '1.1',
+        manifestVersion: 1,
+        permissions: REGISTRATION_PERMISSIONS,
       },
     };
-
-    this.logRaw('outgoing', 'register', payload);
-    this.ws.send(JSON.stringify(payload));
-  }
-
-  /**
-   * Trata as respostas SSAP vindas da TV
-   */
-  private handleMessage(raw: string) {
-    try {
-      const data = JSON.parse(raw);
-      this.logRaw('incoming', data.type || 'response', data, data.uri);
-
-      // Tratamento de Pareamento
-      if (data.type === 'response' && data.payload?.pairingType === 'PROMPT') {
-        this.setStatus('prompt_showing', 'Confirme "Permitir" na tela da sua TV LG!');
-      }
-
-      if (data.type === 'registered') {
-        const returnedKey = data.payload?.['client-key'];
-        if (returnedKey) {
-          if (this.currentDevice) {
-            this.currentDevice.clientKey = returnedKey;
-          }
-          this.clientKeyListeners.forEach((l) => l(returnedKey));
-        }
-
-        this.setStatus('connected', 'Conectado à TV LG webOS');
-
-        // Inicializar assinaturas em tempo real e socket de botões
-        this.setupPointerSocket();
-        this.subscribeVolume();
-        this.subscribeForegroundApp();
-        this.fetchInputs();
-      }
-
-      // Trata respostas com ID correlacionado a Promises pendentes
-      if (data.id && this.pendingRequests.has(data.id)) {
-        const pending = this.pendingRequests.get(data.id)!;
-        clearTimeout(pending.timeout);
-        this.pendingRequests.delete(data.id);
-        if (data.error) {
-          pending.reject(new Error(data.error));
-        } else {
-          pending.resolve(data.payload);
-        }
-      }
-
-      // Trata atualizações de volume emitidas pela TV
-      if (data.uri === 'ssap://audio/getVolume' || data.payload?.volume !== undefined) {
-        const vol = typeof data.payload?.volume === 'number' ? data.payload.volume : 0;
-        const muted = !!data.payload?.muted;
-        this.volumeListeners.forEach((l) => l({ volume: vol, muted }));
-      }
-
-      // Trata atualizações do app em primeiro plano
-      if (data.uri === 'ssap://com.webos.applicationManager/getForegroundAppInfo' || data.payload?.appId) {
-        const appId = data.payload?.appId || null;
-        this.appListeners.forEach((l) => l(appId));
-      }
-    } catch (e) {
-      console.error('Erro ao interpretar pacote SSAP:', e, raw);
+    if (savedKey) {
+      payload['client-key'] = savedKey;
     }
+
+    const message = { type: 'register', id: this.registerId, payload };
+    this.logRaw('outgoing', 'register', { ...message, payload: { ...payload, 'client-key': savedKey ? '***' : undefined } });
+    this.ws.send(JSON.stringify(message));
   }
 
-  /**
-   * Canal Secundário: getPointerInputSocket
-   * Obrigatório para navegação: Setas, OK, Voltar, Home, Números, Cores e Touchpad
-   */
-  private async setupPointerSocket() {
+  /** Trata as mensagens SSAP recebidas da TV */
+  private handleMessage(raw: string) {
+    let data: any;
     try {
-      const res = await this.sendRequest(SSAP_ENDPOINTS.GET_INPUT_SOCKET);
-      const socketPath = res?.socketPath;
-      if (!socketPath) {
-        console.warn('TV não retornou socketPath para botões.');
+      data = JSON.parse(raw);
+    } catch (e) {
+      console.error('Pacote SSAP inválido:', raw);
+      return;
+    }
+
+    this.logRaw('incoming', data.type === 'registered' ? 'registered' : data.type === 'error' ? 'error' : 'response', data, data.uri, data.type === 'error' ? 'error' : 'ok');
+
+    // ----- Respostas do pareamento -----
+    if (data.id && data.id === this.registerId) {
+      if (data.type === 'response' && data.payload?.pairingType === 'PROMPT') {
+        this.setStatus('prompt_showing', 'Confirme "Permitir" na tela da TV');
         return;
       }
+      if (data.type === 'registered') {
+        this.handleRegistered(data.payload?.['client-key']);
+        return;
+      }
+      if (data.type === 'error') {
+        const reason = String(data.error || 'erro desconhecido');
+        const denied = /denied|reject|cancel|403/i.test(reason);
+        this.setStatus('error', denied ? 'Pareamento recusado na TV. Tente de novo e escolha "Permitir".' : `Erro no pareamento: ${reason}`);
+        // Pareamento recusado não deve ficar tentando sozinho
+        if (denied) {
+          this.isIntentionalDisconnect = true;
+          this.clearReconnectTimer();
+        }
+        return;
+      }
+    }
 
-      this.closePointerSocket();
-      this.pointerWs = new WebSocket(socketPath);
+    // ----- Assinatura de volume -----
+    if (data.id && data.id === this.volumeSubId && data.payload) {
+      const p = data.payload;
+      const status = p.volumeStatus || {};
+      const volume = typeof p.volume === 'number' ? p.volume : status.volume;
+      const muted = typeof p.muted === 'boolean' ? p.muted : typeof p.mute === 'boolean' ? p.mute : status.muteStatus;
+      if (typeof volume === 'number') {
+        this.volumeListeners.forEach((l) => l({ volume, muted: !!muted }));
+      }
+    }
 
-      this.pointerWs.onopen = () => {
-        this.logRaw('incoming', 'response', { status: 'Socket de botões e touchpad pronto' }, socketPath);
-      };
+    // ----- Assinatura do app em primeiro plano -----
+    if (data.id && data.id === this.appSubId && data.payload) {
+      const appId = data.payload.appId || null;
+      this.appListeners.forEach((l) => l(appId));
+    }
 
-      this.pointerWs.onerror = (e) => {
-        console.warn('Erro no socket de botões:', e);
-      };
-    } catch (err) {
-      console.warn('Não foi possível obter pointer input socket:', err);
+    // ----- Respostas de requisições com Promise -----
+    if (data.id && this.pendingRequests.has(data.id)) {
+      const pending = this.pendingRequests.get(data.id)!;
+      clearTimeout(pending.timeout);
+      this.pendingRequests.delete(data.id);
+      if (data.type === 'error' || data.error || data.payload?.returnValue === false) {
+        pending.reject(new Error(data.error || data.payload?.errorText || 'A TV recusou o comando'));
+      } else {
+        pending.resolve(data.payload);
+      }
     }
   }
 
-  /**
-   * Envia comando de botão via socket de entrada da TV
-   * Ex: UP, DOWN, LEFT, RIGHT, ENTER, BACK, HOME, MENU, RED, GREEN, YELLOW, BLUE, 0-9
-   */
-  sendButton(buttonName: string): boolean {
-    if (!this.pointerWs || this.pointerWs.readyState !== WebSocket.OPEN) {
-      // Fallback para envio padrão se pointer ainda não estiver aberto
-      this.sendRequest(`ssap://com.webos.service.networkinput/sendButton`, { name: buttonName }).catch(() => {});
-      return false;
+  /** Pareamento concluído: salva a chave e inicia as assinaturas */
+  private handleRegistered(clientKey?: string) {
+    this.reconnectDelayMs = 3000;
+    const device = this.currentDevice;
+    const isNewKey = !!clientKey && clientKey !== device?.clientKey;
+
+    if (device && clientKey) {
+      device.clientKey = clientKey;
+      this.clientKeyListeners.forEach((l) => l({ deviceId: device.id, clientKey }));
     }
 
-    const payload = `type:button\nname:${buttonName}\n\n`;
-    this.pointerWs.send(payload);
-    this.logRaw('outgoing', 'request', { button: buttonName }, 'pointer.input/button');
+    this.setStatus('connected', `Conectado a ${device?.name || 'TV LG'}`);
+
+    if (isNewKey) {
+      this.sendRequest(SSAP_ENDPOINTS.CREATE_TOAST, { message: 'Controle remoto conectado' }).catch(() => {});
+    }
+
+    this.ensurePointerSocket();
+    this.volumeSubId = this.subscribe(SSAP_ENDPOINTS.GET_VOLUME);
+    this.appSubId = this.subscribe(SSAP_ENDPOINTS.GET_FOREGROUND_APP);
+    this.fetchInputs();
+    this.fetchLaunchPoints();
+    this.fetchDeviceInfo();
+  }
+
+  /** Lê modelo, versão do webOS e MACs da TV (o MAC é usado para ligar via Wake-on-LAN) */
+  private async fetchDeviceInfo() {
+    const device = this.currentDevice;
+    if (!device) return;
+    const info: TVDeviceInfo = { deviceId: device.id, port: device.port };
+    const macs: string[] = [];
+
+    try {
+      const sys = await this.sendRequest(SSAP_ENDPOINTS.GET_SYSTEM_INFO);
+      if (sys?.modelName) info.modelName = String(sys.modelName);
+    } catch {}
+
+    try {
+      const sw = await this.sendRequest(SSAP_ENDPOINTS.GET_SW_INFO);
+      if (sw?.product_name) {
+        info.webosVersion = [sw.product_name, sw.major_ver && `${sw.major_ver}.${sw.minor_ver ?? 0}`].filter(Boolean).join(' ');
+      }
+      const mac = normalizeMac(sw?.device_id);
+      if (mac) macs.push(mac);
+    } catch {}
+
+    try {
+      const net = await this.sendRequest(SSAP_ENDPOINTS.GET_NETWORK_INFO);
+      for (const mac of [net?.wifiInfo?.macAddress, net?.wiredInfo?.macAddress].map(normalizeMac)) {
+        if (mac && !macs.includes(mac)) macs.push(mac);
+      }
+    } catch {}
+
+    if (macs.length > 0) info.macs = macs;
+    if (this.currentDevice?.id !== info.deviceId) return;
+    this.deviceInfoListeners.forEach((l) => l(info));
+  }
+
+  // ---------- Socket de botões (setas, OK, voltar, números, touchpad) ----------
+
+  /** Abre (uma única vez) o socket de botões pedido via getPointerInputSocket */
+  private ensurePointerSocket(): Promise<TvSocket | null> {
+    if (this.pointerWs?.isOpen()) return Promise.resolve(this.pointerWs);
+    if (this.pointerOpening) return this.pointerOpening;
+
+    const attempt = this.connectAttempt;
+    this.pointerOpening = (async () => {
+      try {
+        const res = await this.sendRequest(SSAP_ENDPOINTS.GET_INPUT_SOCKET);
+        const socketPath: string | undefined = res?.socketPath;
+        if (!socketPath) throw new Error('A TV não retornou o socketPath');
+
+        const socket = await openTvSocket(socketPath, {
+          onClose: () => {
+            if (this.pointerWs === socket) this.pointerWs = null;
+          },
+        });
+        if (attempt !== this.connectAttempt) {
+          socket.close();
+          return null;
+        }
+        this.pointerWs = socket;
+        this.logRaw('incoming', 'response', { status: 'Socket de botões pronto' }, socketPath);
+        return socket;
+      } catch (err: any) {
+        this.logRaw('system', 'error', { message: `Socket de botões: ${err?.message || err}` }, SSAP_ENDPOINTS.GET_INPUT_SOCKET, 'error');
+        return null;
+      } finally {
+        this.pointerOpening = null;
+      }
+    })();
+    return this.pointerOpening;
+  }
+
+  /** Envia uma mensagem pelo socket de botões, abrindo-o se preciso */
+  private sendPointer(message: string, log?: { uri: string; payload: any }) {
+    if (!this.isConnected()) return false;
+    const deliver = (socket: TvSocket | null) => {
+      if (!socket) return;
+      socket.send(message);
+      if (log) this.logRaw('outgoing', 'request', log.payload, log.uri);
+    };
+    if (this.pointerWs?.isOpen()) {
+      deliver(this.pointerWs);
+    } else {
+      this.ensurePointerSocket().then(deliver);
+    }
     return true;
   }
 
-  /**
-   * Envia movimento do touchpad (mouse da TV)
-   */
+  /** Botão físico: UP, DOWN, LEFT, RIGHT, ENTER, BACK, HOME, MENU, INFO, RED, GREEN, 0-9... */
+  sendButton(buttonName: string): boolean {
+    return this.sendPointer(`type:button\nname:${buttonName}\n\n`, { uri: 'pointer/button', payload: { button: buttonName } });
+  }
+
+  /** Movimento do touchpad (acumula frações para não perder movimentos pequenos) */
   sendPointerMove(dx: number, dy: number): void {
-    if (!this.pointerWs || this.pointerWs.readyState !== WebSocket.OPEN) return;
-    const payload = `type:move\ndx:${Math.round(dx)}\ndy:${Math.round(dy)}\ndown:0\n\n`;
-    this.pointerWs.send(payload);
+    const totalX = dx + this.pointerRemainder.x;
+    const totalY = dy + this.pointerRemainder.y;
+    const moveX = Math.trunc(totalX);
+    const moveY = Math.trunc(totalY);
+    this.pointerRemainder = { x: totalX - moveX, y: totalY - moveY };
+    if (moveX === 0 && moveY === 0) return;
+    this.sendPointer(`type:move\ndx:${moveX}\ndy:${moveY}\ndown:0\n\n`);
   }
 
-  /**
-   * Envia clique do mouse na TV
-   */
   sendPointerClick(): void {
-    if (!this.pointerWs || this.pointerWs.readyState !== WebSocket.OPEN) return;
-    const payload = `type:click\n\n`;
-    this.pointerWs.send(payload);
-    this.logRaw('outgoing', 'request', { action: 'click' }, 'pointer.input/click');
+    this.sendPointer(`type:click\n\n`, { uri: 'pointer/click', payload: { action: 'click' } });
   }
 
-  /**
-   * Envia rolagem vertical (Scroll Wheel)
-   */
   sendPointerScroll(dy: number): void {
-    if (!this.pointerWs || this.pointerWs.readyState !== WebSocket.OPEN) return;
-    const payload = `type:scroll\ndx:0\ndy:${Math.round(dy)}\n\n`;
-    this.pointerWs.send(payload);
+    this.sendPointer(`type:scroll\ndx:0\ndy:${Math.round(dy)}\n\n`);
   }
 
-  /**
-   * Envia requisição genérica SSAP com resposta esperada (Promise)
-   */
+  // ---------- Requisições SSAP ----------
+
+  /** Requisição SSAP com resposta (Promise) */
   sendRequest(uri: string, payload: any = {}): Promise<any> {
     return new Promise((resolve, reject) => {
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('TV não está conectada via WebSocket'));
+      if (!this.ws?.isOpen()) {
+        reject(new Error('TV não está conectada'));
         return;
       }
 
       const id = `req_${++this.reqCounter}`;
-      const message = {
-        type: 'request',
-        id,
-        uri,
-        payload,
-      };
-
       const timeout = setTimeout(() => {
         if (this.pendingRequests.has(id)) {
           this.pendingRequests.delete(id);
-          reject(new Error(`Tempo esgotado para o comando: ${uri}`));
+          reject(new Error(`Tempo esgotado: ${uri}`));
         }
       }, 7000);
 
       this.pendingRequests.set(id, { resolve, reject, timeout });
-
       this.logRaw('outgoing', 'request', payload, uri);
-      this.ws.send(JSON.stringify(message));
+      this.ws.send(JSON.stringify({ type: 'request', id, uri, payload }));
     });
   }
 
-  /**
-   * Assina atualizações em tempo real de Volume
-   */
-  private subscribeVolume() {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    const subMsg = {
-      type: 'subscribe',
-      id: `sub_vol_${++this.reqCounter}`,
-      uri: SSAP_ENDPOINTS.GET_VOLUME,
-    };
-    this.ws.send(JSON.stringify(subMsg));
+  /** Assinatura SSAP (a TV envia atualizações com o mesmo id) */
+  private subscribe(uri: string): string | null {
+    if (!this.ws?.isOpen()) return null;
+    const id = `sub_${++this.reqCounter}`;
+    this.ws.send(JSON.stringify({ type: 'subscribe', id, uri }));
+    return id;
   }
 
-  /**
-   * Assina aplicativo ativo na TV
-   */
-  private subscribeForegroundApp() {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    const subMsg = {
-      type: 'subscribe',
-      id: `sub_app_${++this.reqCounter}`,
-      uri: SSAP_ENDPOINTS.GET_FOREGROUND_APP,
-    };
-    this.ws.send(JSON.stringify(subMsg));
-  }
-
-  /**
-   * Consulta a lista real de entradas físicas (HDMI 1, 2, 3, Antena)
-   */
+  /** Lista real das entradas (HDMI, Antena, AV...) */
   async fetchInputs(): Promise<InputSource[]> {
     try {
       const res = await this.sendRequest(SSAP_ENDPOINTS.GET_INPUT_LIST);
-      if (res?.devices && Array.isArray(res.devices)) {
-        const mapped: InputSource[] = res.devices.map((d: any) => ({
-          id: d.id,
-          label: d.label || d.id,
-          type: d.id.toLowerCase().includes('hdmi') ? 'hdmi' : d.id.toLowerCase().includes('av') ? 'av' : 'antenna',
-          connectedDevice: d.connected ? (d.subType || 'Dispositivo conectado') : 'Desconectado',
-          icon: d.id.toLowerCase().includes('hdmi') ? 'Tv' : 'Radio',
-        }));
+      if (Array.isArray(res?.devices)) {
+        const mapped: InputSource[] = res.devices.map((d: any) => {
+          const id = String(d.id || '');
+          const lower = id.toLowerCase();
+          const type: InputSource['type'] = lower.includes('hdmi') ? 'hdmi' : lower.includes('av') || lower.includes('comp') ? 'av' : lower.includes('usb') ? 'usb' : 'antenna';
+          return {
+            id,
+            label: d.label || id,
+            type,
+            connectedDevice: d.connected ? (d.subType || 'Dispositivo conectado') : 'Nada conectado',
+            icon: type === 'hdmi' ? 'Tv' : 'Radio',
+          };
+        });
         this.inputsListeners.forEach((l) => l(mapped));
         return mapped;
       }
     } catch (e) {
-      console.warn('Não foi possível obter lista de entradas da TV:', e);
+      console.warn('Não foi possível obter a lista de entradas:', e);
     }
     return [];
   }
 
-  /**
-   * Consulta aplicativos instalados na TV
-   */
-  async fetchInstalledApps(): Promise<any[]> {
+  /** Apps instalados na TV (launch points) */
+  async fetchLaunchPoints(): Promise<TVLaunchPoint[]> {
     try {
-      const res = await this.sendRequest(SSAP_ENDPOINTS.LIST_APPS);
-      return res?.apps || [];
+      const res = await this.sendRequest(SSAP_ENDPOINTS.LIST_LAUNCH_POINTS);
+      if (Array.isArray(res?.launchPoints)) {
+        this.launchPoints = res.launchPoints
+          .filter((lp: any) => lp?.id)
+          .map((lp: any) => ({ id: String(lp.id), title: String(lp.title || lp.id) }));
+        this.launchPointListeners.forEach((l) => l(this.launchPoints));
+      }
     } catch (e) {
-      console.warn('Não foi possível obter apps instalados:', e);
-      return [];
+      console.warn('Não foi possível obter os apps instalados:', e);
     }
+    return this.launchPoints;
+  }
+
+  /** Compatibilidade com código antigo */
+  async fetchInstalledApps(): Promise<TVLaunchPoint[]> {
+    return this.fetchLaunchPoints();
+  }
+
+  /**
+   * O id de um app muda por região/modelo (ex.: Prime Video, Max, Globoplay).
+   * Se o id conhecido não estiver instalado, procura pelo nome na lista da TV.
+   */
+  resolveAppId(appId: string, appName?: string): string {
+    if (this.launchPoints.length === 0) return appId;
+    if (this.launchPoints.some((lp) => lp.id === appId)) return appId;
+
+    const normalize = (s: string) => s.toLowerCase().normalize('NFD').replace(/[^a-z0-9]/g, '');
+    const wanted = [appName, appId].filter(Boolean).map((s) => normalize(s!));
+    const match = this.launchPoints.find((lp) => {
+      const title = normalize(lp.title);
+      const id = normalize(lp.id);
+      return wanted.some((w) => w.length >= 3 && (title.includes(w) || w.includes(title) || id.includes(w)));
+    });
+    return match?.id || appId;
+  }
+
+  /** Abre um app na TV */
+  async launchApp(appId: string, appName?: string): Promise<any> {
+    return this.sendRequest(SSAP_ENDPOINTS.LAUNCH, { id: this.resolveAppId(appId, appName) });
+  }
+
+  // ---------- Ligar a TV ----------
+
+  /**
+   * Envia o Wake-on-LAN e tenta reconectar em seguida.
+   * No iOS sem entitlement de multicast só o envio direto ao IP da TV é garantido.
+   */
+  async wake(device: TVDevice): Promise<{ supported: boolean; sent: number; message: string }> {
+    const result = await WakeOnLanService.wake(device);
+    this.logRaw('system', 'wol', result, `udp://${device.ip}:9`, result.sent > 0 ? 'ok' : 'error');
+
+    // Dá tempo para a TV iniciar a rede e tenta conectar
+    this.currentDevice = { ...device };
+    this.isIntentionalDisconnect = false;
+    this.reconnectDelayMs = 3000;
+    this.clearReconnectTimer();
+    this.reconnectTimer = setTimeout(() => this.connect(device), 2500);
+    return result;
   }
 }
 

@@ -1,0 +1,20 @@
+{
+  "name": "lg-tv-bridge",
+  "version": "1.0.0",
+  "description": "Plugin nativo local: WebSocket com certificado autoassinado da TV LG, sondagem TCP da rede e envio UDP (Wake-on-LAN)",
+  "license": "MIT",
+  "private": true,
+  "files": [
+    "ios/Sources",
+    "Package.swift",
+    "LgTvBridge.podspec"
+  ],
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    }
+  },
+  "peerDependencies": {
+    "@capacitor/core": ">=8.0.0"
+  }
+}

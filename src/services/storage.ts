@@ -41,12 +41,35 @@ export class TVStorage {
     const list = this.getDevices();
     const index = list.findIndex((d) => d.id === device.id || d.ip === device.ip);
     if (index >= 0) {
-      list[index] = { ...list[index], ...device };
+      // Mantém a chave de pareamento e os MACs já conhecidos quando o novo cadastro vier sem eles
+      const existing = list[index];
+      list[index] = {
+        ...existing,
+        ...device,
+        clientKey: device.clientKey || existing.clientKey,
+        mac: device.mac || existing.mac,
+        macs: device.macs?.length ? device.macs : existing.macs,
+      };
     } else {
       list.push(device);
     }
     this.saveDevices(list);
     this.setActiveDeviceId(device.id);
+  }
+
+  /** Atualiza campos de um aparelho salvo (modelo, porta, MACs...) */
+  static updateDevice(deviceId: string, changes: Partial<TVDevice>): void {
+    const list = this.getDevices();
+    const index = list.findIndex((d) => d.id === deviceId);
+    if (index >= 0) {
+      list[index] = { ...list[index], ...changes };
+      this.saveDevices(list);
+    }
+  }
+
+  /** Procura um aparelho salvo pelo IP */
+  static findByIp(ip: string): TVDevice | undefined {
+    return this.getDevices().find((d) => d.ip === ip.trim());
   }
 
   static updateClientKey(deviceId: string, clientKey: string): void {

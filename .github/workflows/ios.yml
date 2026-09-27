@@ -1,0 +1,99 @@
+# Gera o IPA do app (sem assinatura) num Mac do GitHub e publica como Release.
+# O IPA não assinado é instalado no iPhone pelo Sideloadly, que assina com o Apple ID do usuário.
+name: Build iOS (IPA)
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-build
+  cancel-in-progress: true
+
+jobs:
+  ipa:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v4
+
+      - name: Selecionar o Xcode mais recente
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Instalar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Build do app web
+        run: npm run build
+
+      - name: Gerar projeto iOS (Capacitor)
+        run: npx cap add ios
+
+      - name: Configurar Info.plist e ícone
+        run: bash scripts/ios-configure.sh
+
+      - name: Compilar sem assinatura
+        run: |
+          mkdir -p build
+          set +e
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/ios \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build > build/xcodebuild.log 2>&1
+          status=$?
+          set -e
+          # Erros de compilação viram anotações visíveis na página do build
+          grep -E "error:" build/xcodebuild.log | sort -u | head -30 | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
+          tail -60 build/xcodebuild.log
+          exit $status
+
+      - name: Empacotar IPA
+        run: |
+          APP_PATH="build/ios/Build/Products/Release-iphoneos/App.app"
+          test -d "$APP_PATH"
+          mkdir -p build/Payload
+          cp -R "$APP_PATH" build/Payload/
+          cd build
+          zip -qry LG-Smart-Remote.ipa Payload
+          ls -lh LG-Smart-Remote.ipa
+
+      - name: Guardar IPA como artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: LG-Smart-Remote-ipa
+          path: build/LG-Smart-Remote.ipa
+          retention-days: 30
+
+      - name: Publicar Release com o IPA
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ios-build-${{ github.run_number }}
+          name: IPA iOS - build ${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          files: build/LG-Smart-Remote.ipa
+          body: |
+            IPA **não assinado** gerado do commit ${{ github.sha }}.
+
+            Instalação no iPhone: abra o **Sideloadly** no computador, arraste o `LG-Smart-Remote.ipa`,
+            informe seu Apple ID e clique em **Start**. Com Apple ID gratuito o app vale por 7 dias.

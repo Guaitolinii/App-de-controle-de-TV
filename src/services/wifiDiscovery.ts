@@ -1,8 +1,12 @@
 /**
- * WiFi Discovery Service for LG Smart TVs
- * Scans candidate local IP addresses on the user's WiFi network via WebSocket probes (ports 3000 & 3001).
- * Works directly in mobile browsers and native apps without requiring iOS multicast permissions.
+ * Busca de TVs LG na rede Wi-Fi.
+ * - App nativo: descobre a faixa do Wi-Fi do celular, testa as portas 3001/3000 de cada IP por TCP
+ *   (sem multicast, então funciona no iOS sem entitlement) e confirma abrindo o WebSocket da TV.
+ * - Navegador: testa por WebSocket numa faixa informada (limitado; útil só em desenvolvimento).
  */
+import { LgTvBridge, isNativeBridgeAvailable } from './nativeBridge';
+import { hostsToScan, isPrivateIp } from './network';
+import { openTvSocket } from './tvSocket';
 
 export interface DiscoveredTV {
   ip: string;
@@ -10,107 +14,139 @@ export interface DiscoveredTV {
   responseTimeMs: number;
 }
 
+export interface ScanResult {
+  found: DiscoveredTV[];
+  /** Faixa escaneada, ex.: 192.168.1.x */
+  subnetLabel: string;
+}
+
+type ProgressFn = (scanned: number, total: number, found: DiscoveredTV[]) => void;
+
+/** Executa tarefas com limite de concorrência */
+async function runPool<T>(items: T[], concurrency: number, task: (item: T) => Promise<void>) {
+  let index = 0;
+  const worker = async () => {
+    while (index < items.length) {
+      const item = items[index++];
+      await task(item);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+}
+
 export class WifiDiscoveryService {
-  /**
-   * Probes a specific IP and port via WebSocket with a short timeout.
-   */
-  static probeIp(ip: string, port: number = 3001, timeoutMs: number = 1200): Promise<DiscoveredTV | null> {
-    return new Promise((resolve) => {
-      const startTime = Date.now();
-      const protocol = port === 3001 ? 'wss' : 'ws';
-      let settled = false;
+  /** O app nativo consegue descobrir a faixa do Wi-Fi sozinho */
+  static canAutoDetectSubnet(): boolean {
+    return isNativeBridgeAvailable();
+  }
 
-      let ws: WebSocket | null = null;
-      const timer = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          if (ws) {
-            try { ws.close(); } catch {}
-          }
-          resolve(null);
-        }
-      }, timeoutMs);
-
-      try {
-        ws = new WebSocket(`${protocol}://${ip}:${port}`);
-
-        ws.onopen = () => {
-          if (!settled) {
-            settled = true;
-            clearTimeout(timer);
-            const responseTimeMs = Date.now() - startTime;
-            try { ws?.close(); } catch {}
-            resolve({ ip, port, responseTimeMs });
-          }
-        };
-
-        ws.onerror = (e) => {
-          // On SSL self-signed or connection refusal, if it failed immediately with connection reset,
-          // it might still indicate a host is there, but for safety we check onclose
-        };
-
-        ws.onclose = (e) => {
-          // In some browsers, self-signed WSS fails with close code 1006 immediately.
-          // If port was 3001 and failed, let's probe port 3000 as fallback
-          if (!settled) {
-            settled = true;
-            clearTimeout(timer);
-            resolve(null);
-          }
-        };
-      } catch (err) {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          resolve(null);
-        }
+  /** IP e máscara do Wi-Fi do celular (somente app nativo) */
+  static async getLocalNetwork(): Promise<{ ip: string; netmask: string } | null> {
+    if (!isNativeBridgeAvailable()) return null;
+    try {
+      const info = await LgTvBridge.getNetworkInfo();
+      if (info.ip && isPrivateIp(info.ip)) {
+        return { ip: info.ip, netmask: info.netmask || '255.255.255.0' };
       }
-    });
+    } catch (e) {
+      console.warn('Não foi possível ler a rede local:', e);
+    }
+    return null;
   }
 
   /**
-   * Scans a list of candidate IPs in parallel with a concurrency limit.
+   * Faz uma conexão rápida ao roteador para o iOS exibir, logo de início, o pedido
+   * "Permitir acesso à rede local". Sem essa permissão a busca não encontra nada.
    */
-  static async scanSubnet(
-    baseSubnet: string, // e.g. "192.168.1" or "192.168.0"
-    onProgress?: (scanned: number, total: number, found: DiscoveredTV[]) => void
-  ): Promise<DiscoveredTV[]> {
-    const found: DiscoveredTV[] = [];
-    const ipsToScan: string[] = [];
+  static async requestLocalNetworkPermission(): Promise<void> {
+    const net = await this.getLocalNetwork();
+    if (!net) return;
+    const gateway = net.ip.split('.').slice(0, 3).join('.') + '.1';
+    try {
+      await LgTvBridge.probePort({ host: gateway, port: 80, timeoutMs: 400 });
+    } catch {}
+  }
 
-    // Most common router DHCP pools assign TVs between .2 and .150
-    for (let i = 2; i <= 80; i++) {
-      ipsToScan.push(`${baseSubnet}.${i}`);
+  /** Busca TVs na rede. subnetBase (ex.: "192.168.1") só é usado no navegador. */
+  static async scan(subnetBase: string, onProgress?: ProgressFn): Promise<ScanResult> {
+    if (isNativeBridgeAvailable()) {
+      return this.scanNative(onProgress);
+    }
+    const found = await this.scanSubnetBrowser(subnetBase, onProgress);
+    return { found, subnetLabel: `${subnetBase}.x` };
+  }
+
+  // ---------- App nativo ----------
+
+  private static async scanNative(onProgress?: ProgressFn): Promise<ScanResult> {
+    const net = await this.getLocalNetwork();
+    if (!net) {
+      return { found: [], subnetLabel: 'Wi-Fi não detectado' };
     }
 
-    const total = ipsToScan.length;
+    const hosts = hostsToScan(net.ip, net.netmask);
+    const total = hosts.length;
+    let scanned = 0;
+    const found: DiscoveredTV[] = [];
+    const candidates: { ip: string; ports: number[] }[] = [];
+
+    // 1) Sondagem TCP rápida das portas webOS
+    await runPool(hosts, 40, async (ip) => {
+      const [p3001, p3000] = await Promise.all(
+        [3001, 3000].map((port) =>
+          LgTvBridge.probePort({ host: ip, port, timeoutMs: 700 }).then((r) => r.open).catch(() => false)
+        )
+      );
+      const ports = [p3001 && 3001, p3000 && 3000].filter((p): p is number => !!p);
+      if (ports.length > 0) candidates.push({ ip, ports });
+      scanned++;
+      onProgress?.(scanned, total, [...found]);
+    });
+
+    // 2) Confirma que é uma TV webOS abrindo o WebSocket (não mostra nada na TV)
+    await runPool(candidates, 6, async ({ ip, ports }) => {
+      for (const port of ports) {
+        const started = Date.now();
+        try {
+          const socket = await openTvSocket(port === 3001 ? `wss://${ip}:3001` : `ws://${ip}:3000`, {}, 3000);
+          socket.close();
+          found.push({ ip, port, responseTimeMs: Date.now() - started });
+          onProgress?.(scanned, total, [...found]);
+          return;
+        } catch {}
+      }
+    });
+
+    found.sort((a, b) => a.ip.localeCompare(b.ip, undefined, { numeric: true }));
+    const prefix = net.ip.split('.').slice(0, 3).join('.');
+    return { found, subnetLabel: `${prefix}.x` };
+  }
+
+  // ---------- Navegador (desenvolvimento) ----------
+
+  /** Testa um IP por WebSocket com tempo curto */
+  static async probeIp(ip: string, port: number = 3001, timeoutMs: number = 1200): Promise<DiscoveredTV | null> {
+    const started = Date.now();
+    try {
+      const socket = await openTvSocket(port === 3001 ? `wss://${ip}:3001` : `ws://${ip}:3000`, {}, timeoutMs);
+      socket.close();
+      return { ip, port, responseTimeMs: Date.now() - started };
+    } catch {
+      return null;
+    }
+  }
+
+  static async scanSubnetBrowser(baseSubnet: string, onProgress?: ProgressFn): Promise<DiscoveredTV[]> {
+    const found: DiscoveredTV[] = [];
+    const ips = Array.from({ length: 254 }, (_, i) => `${baseSubnet}.${i + 1}`);
     let scanned = 0;
 
-    // Concurrency pool of 10
-    const concurrency = 8;
-    let index = 0;
-
-    const worker = async () => {
-      while (index < ipsToScan.length) {
-        const currentIp = ipsToScan[index++];
-        // Test port 3001 first, then 3000
-        let result = await this.probeIp(currentIp, 3001, 1000);
-        if (!result) {
-          result = await this.probeIp(currentIp, 3000, 1000);
-        }
-
-        scanned++;
-        if (result) {
-          found.push(result);
-        }
-        if (onProgress) {
-          onProgress(scanned, total, found);
-        }
-      }
-    };
-
-    const workers = Array.from({ length: concurrency }, () => worker());
-    await Promise.all(workers);
+    await runPool(ips, 16, async (ip) => {
+      const result = (await this.probeIp(ip, 3001, 1000)) || (await this.probeIp(ip, 3000, 1000));
+      scanned++;
+      if (result) found.push(result);
+      onProgress?.(scanned, ips.length, [...found]);
+    });
 
     return found;
   }

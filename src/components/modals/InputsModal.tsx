@@ -1,13 +1,12 @@
 import React from 'react';
 import { X, Tv, Gamepad2, Monitor, Radio, Cable, Check, RefreshCw } from 'lucide-react';
 import { InputSource } from '../../types/tv';
-import { DEFAULT_INPUTS } from '../../services/ssap';
 import { feedback } from '../../services/feedback';
 
 interface InputsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  currentInput: InputSource;
+  currentInput: InputSource | null;
   availableInputs?: InputSource[];
   onRefreshInputs?: () => void;
   onSelectInput: (input: InputSource) => void;
@@ -23,7 +22,8 @@ export const InputsModal: React.FC<InputsModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  const inputs = (availableInputs && availableInputs.length > 0) ? availableInputs : DEFAULT_INPUTS;
+  // Somente as entradas reais informadas pela TV
+  const inputs = availableInputs || [];
 
   const getIcon = (type: string, id: string) => {
     if (id.includes('1')) return <Gamepad2 className="w-5 h-5 text-indigo-400" />;
@@ -67,8 +67,13 @@ export const InputsModal: React.FC<InputsModalProps> = ({
 
         {/* Inputs List */}
         <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+          {inputs.length === 0 && (
+            <div className="p-4 rounded-2xl bg-neutral-950/60 border border-white/5 text-center text-xs text-neutral-400">
+              Nenhuma entrada recebida da TV. Conecte-se à TV e toque em atualizar.
+            </div>
+          )}
           {inputs.map((inp) => {
-            const isActive = currentInput.id === inp.id;
+            const isActive = currentInput?.id === inp.id;
             return (
               <button
                 key={inp.id}
