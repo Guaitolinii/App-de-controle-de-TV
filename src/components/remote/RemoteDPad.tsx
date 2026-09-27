@@ -32,7 +32,7 @@ export const RemoteDPad: React.FC<RemoteDPadProps> = ({
   return (
     <div className="flex flex-col items-center w-full my-1">
       {/* Context Top Buttons: Settings & Inputs */}
-      <div className="flex items-center justify-between w-full px-6 mb-3">
+      <div className="flex items-center justify-between w-full px-6 mb-2">
         <button
           onClick={() => handlePress('QMENU', 'Configurações Rápidas')}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-neutral-800/80 hover:bg-neutral-700/80 active:scale-95 text-neutral-300 text-xs font-medium border border-white/5 transition-all shadow-sm"
@@ -54,7 +54,7 @@ export const RemoteDPad: React.FC<RemoteDPadProps> = ({
       </div>
 
       {/* Main D-Pad Circular Housing */}
-      <div className="relative w-56 h-56 rounded-full bg-gradient-to-b from-neutral-800/90 to-neutral-900/95 p-2 shadow-2xl border border-white/10 ring-1 ring-black/40 flex items-center justify-center">
+      <div className="relative w-[min(14rem,29svh)] h-[min(14rem,29svh)] rounded-full bg-gradient-to-b from-neutral-800/90 to-neutral-900/95 p-2 shadow-2xl border border-white/10 ring-1 ring-black/40 flex items-center justify-center">
         
         {/* Subtle radial inner glow */}
         <div className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_center,_rgba(255,255,255,0.03),transparent_70%)] pointer-events-none" />
@@ -107,7 +107,7 @@ export const RemoteDPad: React.FC<RemoteDPadProps> = ({
       </div>
 
       {/* Surrounding Navigation Buttons: Home, Back, Menu */}
-      <div className="flex items-center justify-between w-full px-6 mt-3">
+      <div className="flex items-center justify-between w-full px-6 mt-2">
         {/* Home Button */}
         <button
           onClick={() => {

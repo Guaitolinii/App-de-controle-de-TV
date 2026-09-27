@@ -34,7 +34,7 @@ export const RemoteVolumeChannels: React.FC<RemoteVolumeChannelsProps> = ({
               feedback.playClick('standard');
               onVolumeUp();
             }}
-            className="w-11 h-12 flex items-center justify-center text-neutral-300 hover:text-white active:scale-90 transition-all rounded-xl hover:bg-white/5"
+            className="w-11 h-11 flex items-center justify-center text-neutral-300 hover:text-white active:scale-90 transition-all rounded-xl hover:bg-white/5"
             title="Volume Aumentar (+)"
           >
             <Plus className="w-5 h-5" />
@@ -51,7 +51,7 @@ export const RemoteVolumeChannels: React.FC<RemoteVolumeChannelsProps> = ({
               feedback.playClick('standard');
               onVolumeDown();
             }}
-            className="w-11 h-12 flex items-center justify-center text-neutral-300 hover:text-white active:scale-90 transition-all rounded-xl hover:bg-white/5"
+            className="w-11 h-11 flex items-center justify-center text-neutral-300 hover:text-white active:scale-90 transition-all rounded-xl hover:bg-white/5"
             title="Volume Diminuir (-)"
           >
             <Minus className="w-5 h-5" />
@@ -101,7 +101,7 @@ export const RemoteVolumeChannels: React.FC<RemoteVolumeChannelsProps> = ({
               feedback.playClick('standard');
               onChannelUp();
             }}
-            className="w-11 h-12 flex items-center justify-center text-neutral-300 hover:text-white active:scale-90 transition-all rounded-xl hover:bg-white/5"
+            className="w-11 h-11 flex items-center justify-center text-neutral-300 hover:text-white active:scale-90 transition-all rounded-xl hover:bg-white/5"
             title="Próximo Canal (CH+)"
           >
             <ChevronUp className="w-5 h-5" />
@@ -118,7 +118,7 @@ export const RemoteVolumeChannels: React.FC<RemoteVolumeChannelsProps> = ({
               feedback.playClick('standard');
               onChannelDown();
             }}
-            className="w-11 h-12 flex items-center justify-center text-neutral-300 hover:text-white active:scale-90 transition-all rounded-xl hover:bg-white/5"
+            className="w-11 h-11 flex items-center justify-center text-neutral-300 hover:text-white active:scale-90 transition-all rounded-xl hover:bg-white/5"
             title="Canal Anterior (CH-)"
           >
             <ChevronDown className="w-5 h-5" />

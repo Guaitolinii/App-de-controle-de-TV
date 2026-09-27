@@ -27,3 +27,34 @@
 .animate-indeterminate {
   animation: indeterminate 1.8s infinite ease-in-out;
 }
+
+/* ---------- Ajustes para celular ---------- */
+html,
+body {
+  /* Fundo escuro também no "quique" da rolagem do iOS */
+  background-color: #07070b;
+  overscroll-behavior: none;
+  /* Sem destaque cinza ao tocar e sem zoom por toque duplo */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Controle remoto: evita seleção de texto e o menu de "copiar" ao segurar botões */
+body {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+input,
+textarea,
+.select-text {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Modais (overlay fixo em tela cheia): respeitam o notch e a barra inferior do iPhone */
+.fixed.inset-0 {
+  padding-top: max(env(safe-area-inset-top), 0.75rem);
+  padding-bottom: max(env(safe-area-inset-bottom), 0.75rem);
+}

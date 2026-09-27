@@ -95,11 +95,11 @@ export const RemoteBody: React.FC<RemoteBodyProps> = ({
     { id: 'touchpad', label: 'Mouse', icon: <MousePointer className="w-3.5 h-3.5" /> },
     { id: 'numpad', label: '123', icon: <Hash className="w-3.5 h-3.5" /> },
     { id: 'keyboard', label: 'Texto', icon: <Keyboard className="w-3.5 h-3.5" /> },
-    { id: 'apps', label: 'Mídia', icon: <PlaySquare className="w-3.5 h-3.5" /> },
+    { id: 'apps', label: 'Apps', icon: <PlaySquare className="w-3.5 h-3.5" /> },
   ];
 
   return (
-    <div className="relative w-full max-w-[390px] mx-auto rounded-[38px] bg-gradient-to-b from-[#1a1a24] via-[#12121a] to-[#0a0a0f] p-4 shadow-[0_20px_50px_rgba(0,0,0,0.8),_inset_0_1px_2px_rgba(255,255,255,0.15)] border border-neutral-700/60 ring-1 ring-white/10 select-none">
+    <div className="relative w-full max-w-[390px] mx-auto rounded-[38px] bg-gradient-to-b from-[#1a1a24] via-[#12121a] to-[#0a0a0f] p-4 [@media(max-height:700px)]:p-3 shadow-[0_20px_50px_rgba(0,0,0,0.8),_inset_0_1px_2px_rgba(255,255,255,0.15)] border border-neutral-700/60 ring-1 ring-white/10 select-none">
       
       {/* Remote Top Sensor Emitter (Simulated IR / BT / WiFi transmitter) */}
       <div className="absolute top-2 left-1/2 -translate-x-1/2 w-16 h-1.5 rounded-full bg-neutral-900 border border-neutral-700/50 flex items-center justify-center">
@@ -121,7 +121,7 @@ export const RemoteBody: React.FC<RemoteBodyProps> = ({
         />
 
         {/* Tab Switcher */}
-        <div className="flex items-center justify-between p-1 bg-neutral-900/90 rounded-2xl border border-white/5 my-3 shadow-inner">
+        <div className="flex items-center justify-between p-1 bg-neutral-900/90 rounded-2xl border border-white/5 my-2 shadow-inner">
           {tabs.map((tab) => {
             const isActive = activeTab === tab.id;
             return (
@@ -165,12 +165,7 @@ export const RemoteBody: React.FC<RemoteBodyProps> = ({
               onChannelDown={onChannelDown}
               onShowInfo={onShowInfo}
             />
-
-            {/* Streaming App Shortcuts */}
-            <RemoteAppShortcuts
-              onLaunchApp={onLaunchApp}
-              activeAppId={activeAppId}
-            />
+            {/* Os atalhos de apps ficam na aba "Apps" para o controle caber na tela sem rolar */}
           </div>
         )}
 
@@ -212,12 +207,6 @@ export const RemoteBody: React.FC<RemoteBodyProps> = ({
           </div>
         )}
 
-        {/* Remote Bottom Logo */}
-        <div className="pt-2 text-center">
-          <span className="text-[9px] font-black tracking-widest text-neutral-600 uppercase">
-            LG Magic Remote • webOS
-          </span>
-        </div>
       </div>
     </div>
   );

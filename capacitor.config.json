@@ -10,5 +10,10 @@
       "launchShowDuration": 1500,
       "backgroundColor": "#0a0a0f"
     }
+  },
+  "backgroundColor": "#07070b",
+  "ios": {
+    "backgroundColor": "#07070b",
+    "contentInset": "never"
   }
 }

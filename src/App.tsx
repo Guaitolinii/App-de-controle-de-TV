@@ -101,6 +101,7 @@ export default function App() {
       if (!saved) return;
       const changes: Partial<TVDevice> = { isOnline: true, lastConnected: Date.now() };
       if (info.port) changes.port = info.port;
+      if (info.pairingManifest) changes.pairingManifest = info.pairingManifest;
       if (info.modelName) changes.modelName = info.modelName;
       if (info.webosVersion) changes.webosVersion = info.webosVersion;
       if (info.macs?.length) {
@@ -357,9 +358,9 @@ export default function App() {
   const isConnected = connectionStatus === 'connected';
 
   return (
-    <div className="min-h-screen bg-[#07070b] text-white flex flex-col items-center justify-between selection:bg-red-600 selection:text-white pb-6 pt-2 px-3 sm:px-4">
+    <div className="min-h-[100dvh] bg-[#07070b] text-white flex flex-col items-center justify-between selection:bg-red-600 selection:text-white px-3 sm:px-4 pt-[max(env(safe-area-inset-top),0.5rem)] pb-[max(env(safe-area-inset-bottom),1rem)]">
       {/* Top Mobile Bar */}
-      <header className="w-full max-w-[420px] mx-auto flex items-center justify-between pb-2 pt-1 border-b border-white/5">
+      <header className="w-full max-w-[420px] mx-auto flex items-center justify-between pb-2 pt-1 border-b border-white/5 [@media(max-height:700px)]:hidden">
         <div className="flex items-center gap-2">
           <img src="/icon.svg" alt="" className="w-7 h-7 rounded-lg shadow-md shadow-red-500/30" />
           <div>
@@ -483,28 +484,19 @@ export default function App() {
                 Conecte seu celular e a TV LG na mesma rede Wi-Fi para parear e controlar.
               </p>
             </div>
-            <div className="space-y-2">
-              <button
-                onClick={() => setIsWifiPairingOpen(true)}
-                className="w-full py-3 rounded-2xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold text-xs shadow-lg shadow-red-600/30 active:scale-95 transition-all flex items-center justify-center gap-2"
-              >
-                <Wifi className="w-4 h-4" />
-                <span>Parear via Wi-Fi</span>
-              </button>
-              <button
-                onClick={() => setIsDeviceManagerOpen(true)}
-                className="w-full py-2.5 rounded-2xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white font-semibold text-xs active:scale-95 transition-all flex items-center justify-center gap-2"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Digitar IP Manualmente</span>
-              </button>
-            </div>
+            <button
+              onClick={() => setIsWifiPairingOpen(true)}
+              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold text-sm shadow-lg shadow-red-600/30 active:scale-95 transition-all flex items-center justify-center gap-2"
+            >
+              <Wifi className="w-4 h-4" />
+              <span>Conectar à TV</span>
+            </button>
           </div>
         )}
       </main>
 
       {/* Bottom Bar: Direct PWA Install prompt if on mobile browser */}
-      {isInstallable && !isInstalled && (
+      {isInstallable && !isInstalled && !isNativeApp() && (
         <div className="w-full max-w-[390px] mx-auto mt-2">
           <button
             onClick={install}
@@ -612,10 +604,10 @@ export default function App() {
         connectionStatus={connectionStatus}
         statusMessage={statusMessage}
         onPairSuccess={(dev) => {
+          // A tela de pareamento continua aberta mostrando o andamento (aviso na TV, erro ou sucesso)
           TVStorage.upsertDevice(dev);
           setDevices(TVStorage.getDevices());
           setActiveDeviceId(dev.id);
-          setIsWifiPairingOpen(false);
         }}
       />
 

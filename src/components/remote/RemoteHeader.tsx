@@ -1,6 +1,7 @@
 import React from 'react';
 import { Power, Wifi, ChevronDown, Terminal, HelpCircle, Sliders, ShieldCheck, Zap } from 'lucide-react';
 import { PowerState, TVDevice } from '../../types/tv';
+import { isNativeApp } from '../../services/nativeBridge';
 
 interface RemoteHeaderProps {
   device: TVDevice;
@@ -69,8 +70,8 @@ export const RemoteHeader: React.FC<RemoteHeaderProps> = ({
                 : 'bg-neutral-500'
             }`} 
           />
-          <span className={powerState === 'on' ? 'text-emerald-400 font-medium' : 'text-neutral-400'}>
-            {powerState === 'on' ? (isPaired ? 'Wi-Fi Pareado' : 'Aguardando Pareamento') : 'Standby (Wi-Fi)'}
+          <span className={`whitespace-nowrap ${powerState === 'on' ? 'text-emerald-400 font-medium' : 'text-neutral-400'}`}>
+            {powerState === 'on' ? (isPaired ? 'Conectada' : 'Aguardando pareamento') : 'Desconectada'}
           </span>
           <span className="text-neutral-600">•</span>
           <span className="text-neutral-500 font-mono text-[9px]">{device.ip}</span>
@@ -88,6 +89,8 @@ export const RemoteHeader: React.FC<RemoteHeaderProps> = ({
           <span className="text-[10px] hidden sm:inline">Wi-Fi</span>
         </button>
 
+        {/* Exportar APK/IPA só faz sentido no navegador, não no app instalado */}
+        {!isNativeApp() && (
         <button
           onClick={onOpenMobileExport}
           title="Instalar / Exportar APK e IPA para Celular"
@@ -96,6 +99,7 @@ export const RemoteHeader: React.FC<RemoteHeaderProps> = ({
           <Zap className="w-3.5 h-3.5 text-red-400" />
           <span className="text-[10px] hidden sm:inline">APK/IPA</span>
         </button>
+        )}
 
         <button
           onClick={onOpenInspector}

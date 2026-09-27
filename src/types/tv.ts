@@ -9,6 +9,8 @@ export interface TVDevice {
   /** Todos os MACs informados pela TV (cabo e Wi-Fi); o Wake-on-LAN envia para cada um */
   macs?: string[];
   port: number;
+  /** Formato de manifesto que a TV aceitou no pareamento */
+  pairingManifest?: 'signed' | 'unsigned';
   clientKey: string;
   modelName: string;
   webosVersion: string;

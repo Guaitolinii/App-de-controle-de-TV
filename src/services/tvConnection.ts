@@ -12,6 +12,7 @@ export interface TVDeviceInfo {
   modelName?: string;
   webosVersion?: string;
   macs?: string[];
+  pairingManifest?: ManifestKind;
 }
 
 /** App instalado na TV (lista de launch points). */
@@ -20,49 +21,78 @@ export interface TVLaunchPoint {
   title: string;
 }
 
+/** Formato do manifesto enviado no pareamento */
+export type ManifestKind = 'signed' | 'unsigned';
+
 /**
- * Permissões pedidas no pareamento. Manifesto sem assinatura, o mesmo formato usado pela
- * biblioteca aiowebostv (Home Assistant), aceito pelas TVs webOS atuais.
+ * Manifesto assinado clássico (o mesmo do LGWebOSRemote / lgtv2), aceito pela maioria das TVs webOS.
+ * A assinatura cobre o bloco "signed": não alterar nenhum campo.
  */
-const REGISTRATION_PERMISSIONS = [
-  'APP_TO_APP',
-  'CLOSE',
-  'CONTROL_AUDIO',
-  'CONTROL_DISPLAY',
-  'CONTROL_INPUT_JOYSTICK',
-  'CONTROL_INPUT_MEDIA_PLAYBACK',
-  'CONTROL_INPUT_MEDIA_RECORDING',
-  'CONTROL_INPUT_TEXT',
-  'CONTROL_INPUT_TV',
-  'CONTROL_MOUSE_AND_KEYBOARD',
-  'CONTROL_POWER',
-  'CONTROL_TV_SCREEN',
-  'LAUNCH',
-  'LAUNCH_WEBAPP',
-  'READ_APP_STATUS',
-  'READ_COUNTRY_INFO',
-  'READ_CURRENT_CHANNEL',
-  'READ_INPUT_DEVICE_LIST',
-  'READ_INSTALLED_APPS',
-  'READ_LGE_SDX',
-  'READ_LGE_TV_INPUT_EVENTS',
-  'READ_NETWORK_STATE',
-  'READ_NOTIFICATIONS',
-  'READ_POWER_STATE',
-  'READ_RUNNING_APPS',
-  'READ_SETTINGS',
-  'READ_TV_CHANNEL_LIST',
-  'READ_TV_CURRENT_TIME',
-  'READ_UPDATE_INFO',
-  'SEARCH',
-  'TEST_OPEN',
-  'TEST_PROTECTED',
-  'TEST_SECURE',
-  'UPDATE_FROM_REMOTE_APP',
-  'WRITE_NOTIFICATION_ALERT',
-  'WRITE_NOTIFICATION_TOAST',
-  'WRITE_SETTINGS',
-];
+const SIGNED_MANIFEST = {
+  appVersion: '1.1',
+  manifestVersion: 1,
+  permissions: [
+    'LAUNCH', 'LAUNCH_WEBAPP', 'APP_TO_APP', 'CLOSE', 'TEST_OPEN', 'TEST_PROTECTED', 'CONTROL_AUDIO',
+    'CONTROL_DISPLAY', 'CONTROL_INPUT_JOYSTICK', 'CONTROL_INPUT_MEDIA_RECORDING', 'CONTROL_INPUT_MEDIA_PLAYBACK',
+    'CONTROL_INPUT_TV', 'CONTROL_POWER', 'READ_APP_STATUS', 'READ_CURRENT_CHANNEL', 'READ_INPUT_DEVICE_LIST',
+    'READ_NETWORK_STATE', 'READ_RUNNING_APPS', 'READ_TV_CHANNEL_LIST', 'WRITE_NOTIFICATION_TOAST', 'READ_POWER_STATE',
+    'READ_COUNTRY_INFO', 'READ_SETTINGS', 'CONTROL_TV_SCREEN', 'CONTROL_TV_STANBY', 'CONTROL_FAVORITE_GROUP',
+    'CONTROL_USER_INFO', 'CHECK_BLUETOOTH_DEVICE', 'CONTROL_BLUETOOTH', 'CONTROL_TIMER_INFO', 'STB_INTERNAL_CONNECTION',
+    'CONTROL_RECORDING', 'READ_RECORDING_STATE', 'WRITE_RECORDING_LIST', 'READ_RECORDING_LIST', 'READ_RECORDING_SCHEDULE',
+    'WRITE_RECORDING_SCHEDULE', 'READ_STORAGE_DEVICE_LIST', 'READ_TV_PROGRAM_INFO', 'CONTROL_BOX_CHANNEL',
+    'READ_TV_ACR_AUTH_TOKEN', 'READ_TV_CONTENT_STATE', 'READ_TV_CURRENT_TIME', 'ADD_LAUNCHER_CHANNEL', 'SET_CHANNEL_SKIP',
+    'RELEASE_CHANNEL_SKIP', 'CONTROL_CHANNEL_BLOCK', 'DELETE_SELECT_CHANNEL', 'CONTROL_CHANNEL_GROUP', 'SCAN_TV_CHANNELS',
+    'CONTROL_TV_POWER', 'CONTROL_WOL',
+  ],
+  signatures: [
+    {
+      signature:
+        'eyJhbGdvcml0aG0iOiJSU0EtU0hBMjU2Iiwia2V5SWQiOiJ0ZXN0LXNpZ25pbmctY2VydCIsInNpZ25hdHVyZVZlcnNpb24iOjF9.hrVRgjCwXVvE2OOSpDZ58hR+59aFNwYDyjQgKk3auukd7pcegmE2CzPCa0bJ0ZsRAcKkCTJrWo5iDzNhMBWRyaMOv5zWSrthlf7G128qvIlpMT0YNY+n/FaOHE73uLrS/g7swl3/qH/BGFG2Hu4RlL48eb3lLKqTt2xKHdCs6Cd4RMfJPYnzgvI4BNrFUKsjkcu+WD4OO2A27Pq1n50cMchmcaXadJhGrOqH5YmHdOCj5NSHzJYrsW0HPlpuAx/ECMeIZYDh6RMqaFM2DXzdKX9NmmyqzJ3o/0lkk/N97gfVRLW5hA29yeAwaCViZNCP8iC9aO0q9fQojoa7NQnAtw==',
+      signatureVersion: 1,
+    },
+  ],
+  signed: {
+    appId: 'com.lge.test',
+    created: '20140509',
+    localizedAppNames: {
+      '': 'LG Remote App',
+      'ko-KR': '\uB9AC\uBAA8\uCEE8 \uC571',
+      'zxx-XX': '\u041B\u0413 R\u044D\u043Cot\u044D A\u041F\u041F',
+    },
+    localizedVendorNames: {
+      '': 'LG Electronics',
+    },
+    permissions: [
+      'TEST_SECURE', 'CONTROL_INPUT_TEXT', 'CONTROL_MOUSE_AND_KEYBOARD', 'READ_INSTALLED_APPS', 'READ_LGE_SDX',
+      'READ_NOTIFICATIONS', 'SEARCH', 'WRITE_SETTINGS', 'WRITE_NOTIFICATION_ALERT', 'CONTROL_POWER',
+      'READ_CURRENT_CHANNEL', 'READ_RUNNING_APPS', 'READ_UPDATE_INFO', 'UPDATE_FROM_REMOTE_APP',
+      'READ_LGE_TV_INPUT_EVENTS', 'READ_TV_CURRENT_TIME',
+    ],
+    serial: '2f930e2d2cfe083771f68e4fe7bb07',
+    vendorId: 'com.lge',
+  },
+};
+
+/** Manifesto sem assinatura (formato do aiowebostv / Home Assistant), usado se o assinado for recusado */
+const UNSIGNED_MANIFEST = {
+  appVersion: '1.1',
+  manifestVersion: 1,
+  permissions: [
+    'APP_TO_APP', 'CLOSE', 'CONTROL_AUDIO', 'CONTROL_DISPLAY', 'CONTROL_INPUT_JOYSTICK', 'CONTROL_INPUT_MEDIA_PLAYBACK',
+    'CONTROL_INPUT_MEDIA_RECORDING', 'CONTROL_INPUT_TEXT', 'CONTROL_INPUT_TV', 'CONTROL_MOUSE_AND_KEYBOARD',
+    'CONTROL_POWER', 'CONTROL_TV_SCREEN', 'LAUNCH', 'LAUNCH_WEBAPP', 'READ_APP_STATUS', 'READ_COUNTRY_INFO',
+    'READ_CURRENT_CHANNEL', 'READ_INPUT_DEVICE_LIST', 'READ_INSTALLED_APPS', 'READ_LGE_SDX', 'READ_LGE_TV_INPUT_EVENTS',
+    'READ_NETWORK_STATE', 'READ_NOTIFICATIONS', 'READ_POWER_STATE', 'READ_RUNNING_APPS', 'READ_SETTINGS',
+    'READ_TV_CHANNEL_LIST', 'READ_TV_CURRENT_TIME', 'READ_UPDATE_INFO', 'SEARCH', 'TEST_OPEN', 'TEST_PROTECTED',
+    'TEST_SECURE', 'UPDATE_FROM_REMOTE_APP', 'WRITE_NOTIFICATION_ALERT', 'WRITE_NOTIFICATION_TOAST', 'WRITE_SETTINGS',
+  ],
+};
+
+/** Resultado de uma tentativa de pareamento */
+type RegisterOutcome =
+  | { type: 'registered'; clientKey?: string }
+  | { type: 'rejected'; error: string }
+  | { type: 'error'; error: string };
 
 /** Monta a URL do socket principal conforme a porta */
 function buildTvUrl(ip: string, port: number): string {
@@ -90,7 +120,14 @@ export class TVConnection {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectDelayMs = 3000;
   private isIntentionalDisconnect = false;
-  private registerId: string | null = null;
+  // Tentativa de pareamento em andamento (aguardando resposta da TV)
+  private registerWaiter: {
+    id: string;
+    socket: TvSocket;
+    promptShown: boolean;
+    arm: (ms: number) => void;
+    finish: (outcome: RegisterOutcome) => void;
+  } | null = null;
   private volumeSubId: string | null = null;
   private appSubId: string | null = null;
   private launchPoints: TVLaunchPoint[] = [];
@@ -198,9 +235,10 @@ export class TVConnection {
   // ---------- Conexão ----------
 
   /**
-   * Conecta à TV LG:
-   * tenta primeiro a porta salva (ou 3001/WSS, padrão das TVs 2022+) e depois a outra (3000/WS).
-   * Chamadas repetidas cancelam a tentativa anterior.
+   * Conecta e pareia com a TV LG. Tentativas, nesta ordem:
+   * porta salva (ou 3001/WSS) e depois a outra (3000/WS); em cada porta, o manifesto assinado e o simples.
+   * Se a TV recusar sem mostrar o aviso, passa para a próxima tentativa.
+   * Se o usuário recusar na TV, para. Chamadas repetidas cancelam a tentativa anterior.
    */
   async connect(device: TVDevice): Promise<void> {
     this.currentDevice = { ...device };
@@ -216,51 +254,145 @@ export class TVConnection {
     }
 
     const ports = device.port === 3000 ? [3000, 3001] : [3001, 3000];
+    const manifests: ManifestKind[] = device.pairingManifest === 'unsigned' ? ['unsigned', 'signed'] : ['signed', 'unsigned'];
+    const failures: string[] = [];
+    let anySocketOpened = false;
+
     this.setStatus('connecting', `Conectando a ${device.name || ip}...`);
 
     for (const port of ports) {
-      const url = buildTvUrl(ip, port);
-      this.logRaw('system', 'request', { action: 'connect', url }, url);
-      try {
-        const socket = await openTvSocket(
-          url,
-          {
-            onMessage: (data) => {
-              if (attempt === this.connectAttempt) this.handleMessage(data);
-            },
-            onClose: (reason) => this.handleMainClose(attempt, reason),
-          },
-          5000
-        );
+      for (const kind of manifests) {
+        if (attempt !== this.connectAttempt) return;
+        const url = buildTvUrl(ip, port);
+        this.logRaw('system', 'request', { action: 'connect', url, manifest: kind }, url);
 
-        // Outra tentativa começou enquanto esta abria: descarta
+        let socket: TvSocket;
+        try {
+          socket = await openTvSocket(
+            url,
+            {
+              onMessage: (data) => {
+                if (attempt === this.connectAttempt) this.handleMessage(data);
+              },
+              onClose: (reason) => this.handleSocketClose(attempt, socket, reason),
+            },
+            5000
+          );
+        } catch (err: any) {
+          if (attempt !== this.connectAttempt) return;
+          const message = err?.message || String(err);
+          failures.push(`${url}: ${message}`);
+          this.logRaw('system', 'error', { url, message }, url, 'error');
+          // A porta nem abriu: não adianta tentar o outro manifesto nela
+          break;
+        }
+
         if (attempt !== this.connectAttempt) {
           socket.close();
           return;
         }
-
+        anySocketOpened = true;
         this.ws = socket;
-        this.currentDevice.port = port;
         this.logRaw('incoming', 'response', { status: 'Socket aberto', url }, url);
-        this.sendHandshakeRegister();
-        return;
-      } catch (err: any) {
+
+        const outcome = await this.register(socket, kind);
         if (attempt !== this.connectAttempt) return;
-        this.logRaw('system', 'error', { url, message: err?.message || String(err) }, url, 'error');
+
+        if (outcome.type === 'registered') {
+          this.currentDevice.port = port;
+          this.currentDevice.pairingManifest = kind;
+          this.handleRegistered(outcome.clientKey);
+          return;
+        }
+
+        // Tentativa falhou: descarta este socket
+        if (this.ws === socket) this.ws = null;
+        socket.close();
+
+        if (outcome.type === 'rejected') {
+          this.isIntentionalDisconnect = true;
+          this.setStatus('error', `A TV não autorizou o controle (${outcome.error}). Tente de novo e escolha "Permitir" na TV.`);
+          return;
+        }
+
+        const label = kind === 'signed' ? 'manifesto assinado' : 'manifesto simples';
+        failures.push(`${url} (${label}): ${outcome.error}`);
+        this.logRaw('system', 'error', { url, manifest: kind, message: outcome.error }, url, 'error');
       }
     }
 
     if (attempt !== this.connectAttempt) return;
+
+    if (!anySocketOpened) {
+      this.setStatus(
+        'error',
+        `A TV não respondeu em ${ip}. Confira se ela está ligada e no mesmo Wi-Fi. Detalhe: ${failures.join(' | ')}`
+      );
+      this.scheduleReconnect();
+      return;
+    }
+
+    // A TV respondeu, mas recusou todas as tentativas sem mostrar o aviso
     this.setStatus(
       'error',
-      'TV não respondeu. Confira se ela está ligada, na mesma rede Wi-Fi e com "LG Connect Apps" ativado.'
+      `A TV recusou a conexão sem mostrar o aviso. Na TV, ative "LG Connect Apps" (Configurações → Geral → Dispositivos → Configurações de dispositivo externo) e tente de novo. Resposta da TV: ${failures.join(' | ')}`
     );
-    this.scheduleReconnect();
+  }
+
+  /** Envia o pedido de registro e espera: pareado, recusado ou erro */
+  private register(socket: TvSocket, kind: ManifestKind): Promise<RegisterOutcome> {
+    return new Promise((resolve) => {
+      const id = `register_${++this.reqCounter}`;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+
+      const finish = (outcome: RegisterOutcome) => {
+        if (this.registerWaiter?.id !== id) return;
+        if (timer) clearTimeout(timer);
+        this.registerWaiter = null;
+        resolve(outcome);
+      };
+      const arm = (ms: number) => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          const waiter = this.registerWaiter;
+          if (waiter?.id !== id) return;
+          finish(
+            waiter.promptShown
+              ? { type: 'rejected', error: 'tempo esgotado esperando "Permitir"' }
+              : { type: 'error', error: 'a TV não respondeu ao pedido de pareamento' }
+          );
+        }, ms);
+      };
+
+      this.registerWaiter = { id, socket, promptShown: false, arm, finish };
+      arm(8000);
+
+      const savedKey = this.currentDevice?.clientKey?.trim();
+      const payload: Record<string, any> = {
+        forcePairing: false,
+        pairingType: 'PROMPT',
+        manifest: kind === 'signed' ? SIGNED_MANIFEST : UNSIGNED_MANIFEST,
+      };
+      if (savedKey) payload['client-key'] = savedKey;
+
+      this.logRaw('outgoing', 'register', { id, manifest: kind, 'client-key': savedKey ? '***' : '(nenhuma)' });
+      socket.send(JSON.stringify({ type: 'register', id, payload }));
+    });
+  }
+
+  /** Um socket fechou: durante o pareamento conta como falha; depois, reconecta */
+  private handleSocketClose(attempt: number, socket: TvSocket, reason: string) {
+    if (attempt !== this.connectAttempt) return;
+    if (this.registerWaiter?.socket === socket) {
+      this.registerWaiter.finish({ type: 'error', error: `a TV fechou a conexão (${reason})` });
+      return;
+    }
+    if (this.ws !== socket) return;
+    this.handleMainClose(reason);
   }
 
   /** Socket principal caiu (TV desligou, Wi-Fi caiu, app foi para segundo plano...) */
-  private handleMainClose(attempt: number, reason: string) {
-    if (attempt !== this.connectAttempt) return;
+  private handleMainClose(reason: string) {
     this.ws = null;
     this.closePointerSocket();
     this.rejectAllPending('Conexão com a TV encerrada');
@@ -278,7 +410,8 @@ export class TVConnection {
     }
     this.closePointerSocket();
     this.rejectAllPending('Conexão reiniciada');
-    this.registerId = null;
+    this.registerWaiter?.finish({ type: 'error', error: 'cancelado' });
+    this.registerWaiter = null;
     this.volumeSubId = null;
     this.appSubId = null;
   }
@@ -337,35 +470,7 @@ export class TVConnection {
     }, delay);
   }
 
-  // ---------- Pareamento ----------
-
-  /**
-   * Envia o pedido de registro SSAP.
-   * Com client-key salva a TV aceita direto; sem ela a TV mostra "Permitir?" na tela.
-   */
-  private sendHandshakeRegister() {
-    if (!this.ws) return;
-
-    const savedKey = this.currentDevice?.clientKey?.trim();
-    this.registerId = `register_${++this.reqCounter}`;
-
-    const payload: Record<string, any> = {
-      forcePairing: false,
-      pairingType: 'PROMPT',
-      manifest: {
-        appVersion: '1.1',
-        manifestVersion: 1,
-        permissions: REGISTRATION_PERMISSIONS,
-      },
-    };
-    if (savedKey) {
-      payload['client-key'] = savedKey;
-    }
-
-    const message = { type: 'register', id: this.registerId, payload };
-    this.logRaw('outgoing', 'register', { ...message, payload: { ...payload, 'client-key': savedKey ? '***' : undefined } });
-    this.ws.send(JSON.stringify(message));
-  }
+  // ---------- Mensagens ----------
 
   /** Trata as mensagens SSAP recebidas da TV */
   private handleMessage(raw: string) {
@@ -380,24 +485,22 @@ export class TVConnection {
     this.logRaw('incoming', data.type === 'registered' ? 'registered' : data.type === 'error' ? 'error' : 'response', data, data.uri, data.type === 'error' ? 'error' : 'ok');
 
     // ----- Respostas do pareamento -----
-    if (data.id && data.id === this.registerId) {
+    const waiter = this.registerWaiter;
+    if (waiter && data.id === waiter.id) {
       if (data.type === 'response' && data.payload?.pairingType === 'PROMPT') {
-        this.setStatus('prompt_showing', 'Confirme "Permitir" na tela da TV');
+        // A TV mostrou o aviso: espera até 2 minutos pelo "Permitir"
+        waiter.promptShown = true;
+        waiter.arm(120000);
+        this.setStatus('prompt_showing', 'Olhe para a TV e escolha "Permitir"');
         return;
       }
       if (data.type === 'registered') {
-        this.handleRegistered(data.payload?.['client-key']);
+        waiter.finish({ type: 'registered', clientKey: data.payload?.['client-key'] });
         return;
       }
       if (data.type === 'error') {
-        const reason = String(data.error || 'erro desconhecido');
-        const denied = /denied|reject|cancel|403/i.test(reason);
-        this.setStatus('error', denied ? 'Pareamento recusado na TV. Tente de novo e escolha "Permitir".' : `Erro no pareamento: ${reason}`);
-        // Pareamento recusado não deve ficar tentando sozinho
-        if (denied) {
-          this.isIntentionalDisconnect = true;
-          this.clearReconnectTimer();
-        }
+        const error = String(data.error || 'erro desconhecido');
+        waiter.finish(waiter.promptShown ? { type: 'rejected', error } : { type: 'error', error });
         return;
       }
     }
@@ -461,7 +564,7 @@ export class TVConnection {
   private async fetchDeviceInfo() {
     const device = this.currentDevice;
     if (!device) return;
-    const info: TVDeviceInfo = { deviceId: device.id, port: device.port };
+    const info: TVDeviceInfo = { deviceId: device.id, port: device.port, pairingManifest: device.pairingManifest };
     const macs: string[] = [];
 
     try {
